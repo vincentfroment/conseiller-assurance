@@ -193,6 +193,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
     </div>
   </div>
   <div class="hdr-btns">
+    <button class="btn btn-dark" onclick="showLanding()" style="font-size:11px">← Menu</button>
     <button class="btn btn-gold" onclick="exportDossier()">💾 Sauvegarder</button>
     <label class="btn btn-dark" style="cursor:pointer">📂 Charger<input type="file" accept=".json" style="display:none" onchange="importDossier(event)"></label>
     <button class="btn btn-dark" onclick="openAdmin()">⚙️ Préférences</button>
@@ -206,8 +207,10 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 
 <!-- MAIN -->
 <div style="max-width:1120px;margin:0 auto;padding:20px 16px">
-  <div class="stepper no-print" id="stepper"></div>
-  <div id="step-0"></div>
+  <!-- LANDING / CHOIX DE MODE -->
+  <div id="landing" style="display:none"></div>
+  <div class="stepper no-print" id="stepper" style="display:none"></div>
+  <div id="step-0" style="display:none"></div>
   <div id="step-1" style="display:none"></div>
   <div id="step-2" style="display:none"></div>
   <div id="step-3" style="display:none"></div>
@@ -215,6 +218,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
   <div id="step-5" style="display:none"></div>
   <div id="step-6" style="display:none"></div>
   <div id="step-7" style="display:none"></div>
+  <!-- EXPRESS -->
+  <div id="step-e0" style="display:none"></div>
+  <div id="step-e1" style="display:none"></div>
+  <div id="step-e2" style="display:none"></div>
+  <div id="step-e3" style="display:none"></div>
 </div>
 
 <!-- ADMIN OVERLAY -->
@@ -450,7 +458,7 @@ let S={
   protMG:emptyMG(),protMGC:emptyMG(),
   _activeVie:null,_activeVieC:null,
   _activeInv:null,_activeInvC:null,
-  _activeMG:null,_activeMGC:null,
+  _activeMG:null,_activeMGC:null,_activeCol:null,
   protCol:emptyCol(),
   protHypo:emptyHypo(),
   revRetraite:emptyRevRetraite(),
@@ -481,6 +489,12 @@ function savePrefs(){try{localStorage.setItem("ec_prefs_v2",JSON.stringify(produ
 function getPrefsDate(){try{return localStorage.getItem("ec_prefs_upd");}catch{return null;}}
 
 function showStep(n){
+  // Assurer que le stepper full est visible
+  const stepperEl=document.querySelector('.stepper.no-print');
+  if(stepperEl) stepperEl.style.display='flex';
+  // Cacher les étapes express
+  ['e0','e1','e2','e3'].forEach(s=>{const d=$("step-"+s);if(d)d.style.display='none';});
+  $("landing").style.display='none';
   for(let i=0;i<8;i++) $("step-"+i).style.display=i===n?"block":"none";
   currentStep=n; renderStepper(); window.scrollTo(0,0);
   // Re-render l'étape active pour refléter les données à jour
@@ -2519,6 +2533,646 @@ function updateHdr(){
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// MODE : 'landing' | 'full' | 'express'
+// ═══════════════════════════════════════════════════════════
+let appMode = 'landing';
+let expressStep = 0;
+const ESTEPS = ["Profil","Bilan & Protections","Objectifs","Résumé"];
+
+function showLanding() {
+  appMode = 'landing';
+  document.querySelector('.stepper.no-print').style.display = 'none';
+  for(let i=0;i<8;i++){const d=$("step-"+i);if(d)d.style.display='none';}
+  ['e0','e1','e2','e3'].forEach(s=>{const d=$("step-"+s);if(d)d.style.display='none';});
+  $("landing").style.display='block';
+  renderLanding();
+}
+
+function startFull() {
+  appMode='full';
+  $("landing").style.display='none';
+  ['e0','e1','e2','e3'].forEach(s=>{const d=$("step-"+s);if(d)d.style.display='none';});
+  document.querySelector('.stepper.no-print').style.display='flex';
+  currentStep=0;
+  renderAll();
+  showStep(0);
+}
+
+function startExpress() {
+  appMode='express';
+  $("landing").style.display='none';
+  document.querySelector('.stepper.no-print').style.display='none';
+  for(let i=0;i<8;i++){const d=$("step-"+i);if(d)d.style.display='none';}
+  expressStep=0;
+  showExpressStep(0);
+}
+
+function showExpressStep(n) {
+  expressStep=n;
+  ['e0','e1','e2','e3'].forEach((s,i)=>{
+    const d=$("step-"+s);if(d)d.style.display=i===n?'block':'none';
+  });
+  window.scrollTo(0,0);
+  const renders=[renderExpressStep0,renderExpressStep1,renderExpressStep2,renderExpressStep3];
+  try{renders[n]&&renders[n]();}catch(e){console.error("EXPRESS STEP",n,e);}
+}
+
+// ─── LANDING ───────────────────────────────────────────────
+function renderLanding() {
+  const el=$("landing"); el.innerHTML='';
+  el.style.cssText='min-height:70vh;display:flex;align-items:center;justify-content:center;padding:20px 0';
+  const wrap=document.createElement('div'); wrap.style.cssText='width:100%;max-width:680px;margin:0 auto';
+
+  const hero=document.createElement('div'); hero.style.cssText='text-align:center;margin-bottom:32px';
+  hero.innerHTML=`
+    <div style="font-size:11px;color:var(--gold);letter-spacing:.18em;font-weight:700;text-transform:uppercase;margin-bottom:4px">Elevate Capital</div>
+    <div style="font-size:9px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:20px">Conseiller Assurance — Usage interne</div>
+    <div style="font-size:30px;margin-bottom:10px">📋</div>
+    <div style="font-size:22px;font-weight:800;color:var(--dark);font-family:'DM Serif Display',serif;margin-bottom:8px">Nouvelle analyse</div>
+    <div style="font-size:13px;color:var(--muted)">Choisissez le type d'analyse selon la situation</div>`;
+  wrap.appendChild(hero);
+
+  const cards=document.createElement('div'); cards.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px';
+
+  // Card Express
+  const cEx=document.createElement('div');
+  cEx.style.cssText='border:2px solid var(--gold);border-radius:14px;padding:24px 20px;cursor:pointer;background:var(--gold-bg);transition:all .15s;text-align:center';
+  cEx.innerHTML=`
+    <div style="font-size:26px;margin-bottom:10px">⚡</div>
+    <div style="font-size:14px;font-weight:800;color:var(--gold-d);margin-bottom:6px">Version Express</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">4 étapes · ~8 minutes<br>Première rencontre ou revue rapide</div>
+    <div style="text-align:left;display:flex;flex-direction:column;gap:4px;margin-bottom:16px">
+      ${['Profil complet + conjoint','Bilan & protections','Objectifs & priorités','Résumé full condensé'].map(t=>`<div style="font-size:10px;color:var(--gold-d)">✓ ${t}</div>`).join('')}
+    </div>
+    <button class="btn btn-gold" style="width:100%;font-size:12px">Démarrer Express →</button>`;
+  cEx.querySelector('button').onclick=startExpress;
+  cEx.onmouseenter=()=>cEx.style.transform='translateY(-2px)';
+  cEx.onmouseleave=()=>cEx.style.transform='';
+  cards.appendChild(cEx);
+
+  // Card Full
+  const cFull=document.createElement('div');
+  cFull.style.cssText='border:2px solid var(--border);border-radius:14px;padding:24px 20px;cursor:pointer;background:white;transition:all .15s;text-align:center';
+  cFull.innerHTML=`
+    <div style="font-size:26px;margin-bottom:10px">📊</div>
+    <div style="font-size:14px;font-weight:800;color:var(--dark);margin-bottom:6px">Version Complète</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">8 étapes · ~25 minutes<br>Analyse ABF exhaustive</div>
+    <div style="text-align:left;display:flex;flex-direction:column;gap:4px;margin-bottom:16px">
+      ${['Profil détaillé + médical','Bilan actif/passif complet','Calcul ABF + facteurs iA','Profil risque + 8 gammes'].map(t=>`<div style="font-size:10px;color:var(--muted)">✓ ${t}</div>`).join('')}
+    </div>
+    <button class="btn" style="width:100%;font-size:12px">Démarrer Complet →</button>`;
+  cFull.querySelector('button').onclick=startFull;
+  cFull.onmouseenter=()=>{cFull.style.borderColor='var(--dark)';cFull.style.transform='translateY(-2px)';};
+  cFull.onmouseleave=()=>{cFull.style.borderColor='var(--border)';cFull.style.transform='';};
+  cards.appendChild(cFull);
+  wrap.appendChild(cards);
+
+  // Charger dossier
+  const ld=document.createElement('div'); ld.style.cssText='text-align:center;padding:14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)';
+  ld.innerHTML='<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Reprendre un dossier existant</div>';
+  const lbl=document.createElement('label'); lbl.className='btn btn-dark'; lbl.style.cssText='font-size:11px;cursor:pointer';
+  lbl.innerHTML='📂 Charger un dossier JSON<input type="file" accept=".json" style="display:none">';
+  lbl.querySelector('input').onchange=function(e){
+    const f=e.target.files[0];if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);Object.assign(S,d);startFull();}catch{alert('Fichier invalide');}};
+    reader.readAsText(f);
+  };
+  ld.appendChild(lbl);
+  wrap.appendChild(ld);
+  el.appendChild(wrap);
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPRESS ÉTAPE 0 — PROFIL COMPLET CONDENSÉ
+// ═══════════════════════════════════════════════════════════
+function renderExpressStep0() {
+  const c=$("step-e0"); c.innerHTML='';
+  c.appendChild(eStepperEl());
+
+  // ── Section Vous ──
+  const card=document.createElement('div'); card.className='card';
+  card.appendChild(makeSecHead('1 — Profil client','Informations essentielles'));
+
+  // Identité
+  const g1=document.createElement('div'); g1.className='g3';
+  [{l:'Prénom *',k:'prenom'},{l:'Nom *',k:'nom'},{l:'Date de naissance',k:'dateNaissance',type:'date'}].forEach(({l,k,type})=>{
+    g1.appendChild(makeInp(l,S.vous[k]||'',v=>{S.vous[k]=v;},type||'text'));
+  });
+  card.appendChild(g1);
+
+  const g2=document.createElement('div'); g2.className='g3'; g2.style.marginTop='10px';
+  // État civil
+  {const w=document.createElement('div');
+  w.innerHTML=`<label class="lbl">État civil</label><select class="sel"><option value="">—</option>${["Célibataire","Marié(e)","Conjoint(e) de fait","Divorcé(e)","Veuf/Veuve"].map(v=>`<option${S.vous.etatCivil===v?" selected":""}>${v}</option>`).join('')}</select>`;
+  w.querySelector('select').onchange=e=>{S.vous.etatCivil=e.target.value;renderExpressStep0();};g2.appendChild(w);}
+  g2.appendChild(makeInp('Courriel',S.vous.courriel||'',v=>S.vous.courriel=v,'email'));
+  g2.appendChild(makeInp('Tél. cellulaire',S.vous.telCellulaire||'',v=>S.vous.telCellulaire=v,'tel'));
+  card.appendChild(g2);
+
+  // Revenus
+  const g3=document.createElement('div'); g3.className='g2'; g3.style.marginTop='10px';
+  g3.appendChild(makeMoney("Revenu d'emploi ($/an)",S.vous.revenuEmploi||0,v=>{S.vous.revenuEmploi=v;}));
+  g3.appendChild(makeMoney("Autres revenus ($/an)",S.vous.autresRevenus||0,v=>{S.vous.autresRevenus=v;}));
+  card.appendChild(g3);
+
+  // Fumeur + enfants + médical rapide
+  const gFlags=document.createElement('div'); gFlags.style.cssText='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding:12px 14px;background:var(--bg2);border-radius:9px;align-items:center';
+
+  function pillsRow(label, options, getter, setter, rerender) {
+    const w=document.createElement('div'); w.style.cssText='display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+    w.innerHTML=`<span style="font-size:11px;color:var(--muted);white-space:nowrap">${label}</span>`;
+    options.forEach(([l,v])=>{
+      const b=document.createElement('button'); b.className='pill'+(getter()===v?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+      b.textContent=l; b.onclick=()=>{setter(v);rerender();};w.appendChild(b);
+    });
+    return w;
+  }
+  gFlags.appendChild(pillsRow('Tabac',
+    [['Non-fumeur',false],['Fumeur',true]],
+    ()=>S.vous.fumeur, v=>{S.vous.fumeur=v;}, renderExpressStep0));
+  gFlags.appendChild(pillsRow('Enfants',
+    [['Oui',true],['Non',false]],
+    ()=>S.vous.aEnfants, v=>{S.vous.aEnfants=v;}, renderExpressStep0));
+  card.appendChild(gFlags);
+
+  // Conditions médicales clés (rapide)
+  const medDiv=document.createElement('div'); medDiv.style.cssText='margin-top:10px;padding:12px 14px;background:var(--bg2);border-radius:9px;border:1px solid var(--border)';
+  medDiv.innerHTML='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Conditions médicales (si applicable)</div>';
+  const condGrid=document.createElement('div'); condGrid.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+  const CONDS_EXPRESS=['Cardiovasculaire','Diabète','Cancer','Hypertension','Dépression/anxiété','Maladie chronique','Antécédents familiaux graves'];
+  CONDS_EXPRESS.forEach(cond=>{
+    const on=(S.med.conditions||[]).includes(cond);
+    const b=document.createElement('button'); b.className='pill'+(on?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+    b.textContent=cond;
+    b.onclick=()=>{
+      if(!S.med.conditions)S.med.conditions=[];
+      if(on)S.med.conditions=S.med.conditions.filter(x=>x!==cond);
+      else S.med.conditions.push(cond);
+      renderExpressStep0();
+    };
+    condGrid.appendChild(b);
+  });
+  medDiv.appendChild(condGrid);
+
+  // Pref no-exam
+  const noExRow=document.createElement('div'); noExRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px';
+  noExRow.innerHTML='<span style="font-size:11px;color:var(--muted)">Sans examen médical (préféré)</span>';
+  const noExBtn=document.createElement('button'); noExBtn.className='pill'+(S.med.preferenceNoExam?' on':''); noExBtn.style.cssText='font-size:10px;padding:3px 9px';
+  noExBtn.textContent=S.med.preferenceNoExam?'✓ Oui':'Non'; noExBtn.onclick=()=>{S.med.preferenceNoExam=!S.med.preferenceNoExam;renderExpressStep0();};
+  noExRow.appendChild(noExBtn);
+  medDiv.appendChild(noExRow);
+  card.appendChild(medDiv);
+  c.appendChild(card);
+
+  // ── Section Conjoint ──
+  const hasConj=S.vous.etatCivil&&['Marié(e)','Conjoint(e) de fait'].includes(S.vous.etatCivil);
+  if(hasConj){
+    const cardC=document.createElement('div'); cardC.className='card'; cardC.style.marginTop='16px';
+    cardC.appendChild(makeSecHead('2 — Conjoint(e)','Profil du conjoint'));
+    const gc1=document.createElement('div'); gc1.className='g3';
+    [{l:'Prénom',k:'prenom'},{l:'Nom',k:'nom'},{l:'Date de naissance',k:'dateNaissance',type:'date'}].forEach(({l,k,type})=>{
+      gc1.appendChild(makeInp(l,S.conjoint[k]||'',v=>{S.conjoint[k]=v;},type||'text'));
+    });
+    cardC.appendChild(gc1);
+    const gc2=document.createElement('div'); gc2.className='g2'; gc2.style.marginTop='10px';
+    gc2.appendChild(makeMoney("Revenu conjoint ($/an)",S.conjoint.revenuEmploi||0,v=>{S.conjoint.revenuEmploi=v;}));
+    gc2.appendChild(makeInp('Courriel conjoint',S.conjoint.courriel||'',v=>S.conjoint.courriel=v,'email'));
+    cardC.appendChild(gc2);
+    const gcFlags=document.createElement('div'); gcFlags.style.cssText='display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;padding:10px 14px;background:var(--bg2);border-radius:9px';
+    gcFlags.appendChild(pillsRow('Tabac (conjoint)',
+      [['Non-fumeur',false],['Fumeur',true]],
+      ()=>S.conjoint.fumeur, v=>{S.conjoint.fumeur=v;}, renderExpressStep0));
+    cardC.appendChild(gcFlags);
+    c.appendChild(cardC);
+  }
+
+  c.appendChild(eNavEl(false, true, ()=>showExpressStep(1)));
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPRESS ÉTAPE 1 — BILAN & PROTECTIONS
+// ═══════════════════════════════════════════════════════════
+function renderExpressStep1() {
+  const c=$("step-e1"); c.innerHTML='';
+  c.appendChild(eStepperEl());
+  const aC=isConjoint();
+  const fmt=v=>v?new Intl.NumberFormat("fr-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(v):"—";
+
+  // ── ABF Simplifié ──
+  const cardABF=document.createElement('div'); cardABF.className='card';
+  cardABF.appendChild(makeSecHead('1 — Bilan financier','Revenus, dettes et besoins de protection'));
+
+  const ga=document.createElement('div'); ga.className='g2';
+  {const w=makeMoney('Revenu mensuel net — Vous',S.abf.revMensuel||0,v=>{S.abf.revMensuel=v;renderExpressStep1();}); ga.appendChild(w);}
+  if(aC){const w=makeMoney('Revenu mensuel net — Conjoint(e)',S.abf.revMensuelC||0,v=>{S.abf.revMensuelC=v;renderExpressStep1();}); ga.appendChild(w);}
+  cardABF.appendChild(ga);
+
+  const gb=document.createElement('div'); gb.className='g2'; gb.style.marginTop='10px';
+  {const w=makeMoney('Solde hypothèque',S.passif.soldeHypo||0,v=>{S.passif.soldeHypo=v;renderExpressStep1();}); gb.appendChild(w);}
+  {const w=makeMoney('Autres dettes (auto, marge, cartes)',S.passif.soldeMarge||0,v=>{S.passif.soldeMarge=v;renderExpressStep1();}); gb.appendChild(w);}
+  cardABF.appendChild(gb);
+
+  const gc=document.createElement('div'); gc.className='g2'; gc.style.marginTop='10px';
+  {const w=makeMoney('Actif liquide (épargne, REER, CELI)',((S.actif.liquidites||0)+(S.actif.reer||0)),v=>{S.actif.liquidites=v;renderExpressStep1();}); gc.appendChild(w);}
+  {const w=makeMoney('Fonds d\'urgence souhaité',S.passif.fondsUrgence||0,v=>{S.passif.fondsUrgence=v;renderExpressStep1();}); gc.appendChild(w);}
+  cardABF.appendChild(gc);
+
+  // Durée remplacement
+  const durDiv=document.createElement('div'); durDiv.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);border-radius:9px;margin-top:12px';
+  durDiv.innerHTML='<span style="font-size:11px;color:var(--muted);white-space:nowrap">Années de remplacement</span>';
+  [10,15,20,25,30].forEach(v=>{
+    const b=document.createElement('button'); b.className='pill'+(S.abf.duree===v?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+    b.textContent=v+' ans'; b.onclick=()=>{S.abf.duree=v;renderExpressStep1();}; durDiv.appendChild(b);
+  });
+  cardABF.appendChild(durDiv);
+
+  // Calcul ABF
+  const rev=S.abf.revMensuel||0;
+  const revC=S.abf.revMensuelC||0;
+  const duree=S.abf.duree||20;
+  const taux=(S.abf.taux||5)/100;
+  const facteur=taux>0?((1-Math.pow(1+taux/12,-duree*12))/(taux/12)):duree*12;
+  const dettes=(S.passif.soldeHypo||0)+(S.passif.soldeMarge||0)+(S.passif.fondsUrgence||0);
+  const liquidite=(((S.actif.liquidites||0)+(S.actif.reer||0)));
+  const b70=Math.max(0,Math.round(rev*0.7*facteur)+dettes-liquidite);
+  const b70C=Math.max(0,Math.round(revC*0.7*facteur));
+  S._abfResult70=b70; S._abfResult70C=b70C;
+
+  if(rev>0){
+    const resDiv=document.createElement('div'); resDiv.style.cssText='margin-top:14px;border-radius:10px;overflow:hidden;border:1.5px solid var(--gold)';
+    resDiv.innerHTML=`<div style="background:var(--gold);padding:7px 14px;font-size:9px;font-weight:700;color:var(--dark);text-transform:uppercase;letter-spacing:.08em">Capital décès estimé · 70% du revenu · ${duree} ans</div>`;
+    const rb=document.createElement('div'); rb.style.cssText='display:grid;grid-template-columns:1fr'+(aC&&revC>0?' 1fr':'');
+    [{l:'Vous',v:b70,show:rev>0},{l:'Conjoint(e)',v:b70C,show:aC&&revC>0}].filter(i=>i.show).forEach(item=>{
+      const d=document.createElement('div'); d.style.cssText='padding:12px 16px;text-align:center;border-right:1px solid var(--border)';
+      d.innerHTML=`<div style="font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:4px">${item.l}</div><div style="font-size:20px;font-weight:800;color:var(--gold-d)">${fmt(item.v)}</div>${liquidite>0?`<div style="font-size:9px;color:var(--green);margin-top:2px">Liquidité déduite : ${fmt(liquidite)}</div>`:''}`;
+      rb.appendChild(d);
+    });
+    resDiv.appendChild(rb);
+    cardABF.appendChild(resDiv);
+  }
+  c.appendChild(cardABF);
+
+  // ── Protections existantes ──
+  const cardProt=document.createElement('div'); cardProt.className='card'; cardProt.style.marginTop='16px';
+  cardProt.appendChild(makeSecHead('2 — Protections en vigueur','Ce que le client possède déjà'));
+
+  function makeProt(label, icon, youKey, conjKey, montantLabel, getMontant, setMontant) {
+    const wrap=document.createElement('div'); wrap.style.cssText='padding:12px 14px;border-radius:10px;border:1.5px solid var(--border);margin-bottom:10px;background:white';
+    const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+    row.innerHTML=`<span style="font-size:18px">${icon}</span><span style="font-size:13px;font-weight:600;flex:1">${label}</span>`;
+
+    // Vous
+    const yD=document.createElement('div'); yD.style.cssText='display:flex;align-items:center;gap:5px';
+    yD.innerHTML='<span style="font-size:10px;color:var(--muted)">Vous</span>';
+    [['✓ Oui',true],['Non',false]].forEach(([l,v])=>{
+      const b=document.createElement('button'); b.className='pill'+(S[youKey]===v?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+      b.textContent=l; b.onclick=()=>{S[youKey]=v;renderExpressStep1();}; yD.appendChild(b);
+    });
+    row.appendChild(yD);
+
+    // Conjoint
+    if(aC&&conjKey){
+      const cD=document.createElement('div'); cD.style.cssText='display:flex;align-items:center;gap:5px';
+      cD.innerHTML='<span style="font-size:10px;color:var(--muted)">Conjoint(e)</span>';
+      [['✓ Oui',true],['Non',false]].forEach(([l,v])=>{
+        const b=document.createElement('button'); b.className='pill'+(S[conjKey]===v?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+        b.textContent=l; b.onclick=()=>{S[conjKey]=v;renderExpressStep1();}; cD.appendChild(b);
+      });
+      row.appendChild(cD);
+    }
+    wrap.appendChild(row);
+
+    // Montant si actif
+    if(S[youKey]===true&&montantLabel){
+      const mRow=document.createElement('div'); mRow.style.cssText='margin-top:10px';
+      const mW=makeMoney(montantLabel,getMontant(),setMontant); mRow.appendChild(mW);
+      wrap.appendChild(mRow);
+    }
+    return wrap;
+  }
+
+  cardProt.appendChild(makeProt('Assurance vie','🛡️','_activeVie','_activeVieC',
+    'Capital assuré (vous)',
+    ()=>S.protVie[0]?.capital||0,
+    v=>{if(!S.protVie[0])S.protVie[0]=emptyVie();S.protVie[0].capital=v;}));
+  cardProt.appendChild(makeProt('Assurance invalidité','🏥','_activeInv','_activeInvC',
+    'Revenu mensuel assuré',
+    ()=>S.protInv.revenuMensuel||0,
+    v=>{S.protInv.revenuMensuel=v;}));
+  cardProt.appendChild(makeProt('Maladies graves','❤️‍🩹','_activeMG','_activeMGC',
+    'Capital MG assuré',
+    ()=>S.protMG.capitalAssure||0,
+    v=>{S.protMG.capitalAssure=v;}));
+
+  // Collective + hypothécaire rapide
+  const colRow=document.createElement('div'); colRow.style.cssText='padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;background:white';
+  colRow.innerHTML='<span style="font-size:18px">🏢</span><span style="font-size:13px;font-weight:600;flex:1">Assurance collective</span>';
+  [['✓ Oui',true],['Non',false]].forEach(([l,v])=>{
+    const b=document.createElement('button'); b.className='pill'+(S._activeCol===v?' on':''); b.style.cssText='font-size:10px;padding:3px 9px';
+    b.textContent=l; b.onclick=()=>{S._activeCol=v;renderExpressStep1();}; colRow.appendChild(b);
+  });
+  cardProt.appendChild(colRow);
+  c.appendChild(cardProt);
+
+  c.appendChild(eNavEl(true, true, ()=>showExpressStep(2), ()=>showExpressStep(0)));
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPRESS ÉTAPE 2 — OBJECTIFS & PRIORITÉS
+// ═══════════════════════════════════════════════════════════
+function renderExpressStep2() {
+  const c=$("step-e2"); c.innerHTML='';
+  c.appendChild(eStepperEl());
+
+  const card=document.createElement('div'); card.className='card';
+  card.appendChild(makeSecHead('Objectifs & priorités','Qu\'est-ce qui est le plus important pour ce client?'));
+
+  // Besoins (pillers multi-select)
+  const besDiv=document.createElement('div'); besDiv.style.marginTop='8px';
+  besDiv.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Besoins identifiés</div>';
+  const besGrid=document.createElement('div'); besGrid.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+  const BESOINS=[
+    'Protection famille (décès)','Remplacement revenu (invalidité)','Maladies graves',
+    'Retraite & accumulation','Succession & héritage','Épargne / Placements',
+    'Protection entreprise','Dettes & hypothèque','Soins de longue durée',
+    'Assurance voyage','Médicaments & para-médical','Vie participante (PAR)'
+  ];
+  BESOINS.forEach(b=>{
+    const on=S.besoins.includes(b);
+    const btn=document.createElement('button'); btn.className='pill'+(on?' on':''); btn.style.cssText='font-size:11px;padding:5px 12px';
+    btn.textContent=b;
+    btn.onclick=()=>{
+      if(on)S.besoins=S.besoins.filter(x=>x!==b);
+      else S.besoins.push(b);
+      renderExpressStep2();
+    };
+    besGrid.appendChild(btn);
+  });
+  besDiv.appendChild(besGrid);
+  card.appendChild(besDiv);
+
+  // Priorités top 3
+  const prioDiv=document.createElement('div'); prioDiv.style.cssText='margin-top:18px;padding:14px;background:var(--gold-bg);border-radius:10px;border:1px solid var(--gold)';
+  prioDiv.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--gold-d);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Top 3 priorités (ordre de la discussion)</div>';
+
+  const PRIO_OPTIONS=S.prioritesObjectifs;
+  [0,1,2].forEach(rank=>{
+    const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px';
+    row.innerHTML=`<div style="width:24px;height:24px;border-radius:50%;background:var(--gold);color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${rank+1}</div>`;
+    const sel=document.createElement('select'); sel.className='sel'; sel.style.flex='1'; sel.style.fontSize='12px';
+    sel.innerHTML='<option value="">— Sélectionner —</option>'+PRIO_OPTIONS.map(p=>`<option${S.recs[rank]===p?' selected':''}>${p}</option>`).join('');
+    sel.onchange=e=>{S.recs[rank]=e.target.value;};
+    row.appendChild(sel);
+    prioDiv.appendChild(row);
+  });
+  card.appendChild(prioDiv);
+
+  // Budget
+  const budDiv=document.createElement('div'); budDiv.style.cssText='margin-top:14px;display:flex;align-items:flex-end;gap:12px';
+  {const w=makeMoney('Budget mensuel disponible (primes)',S.abf._budgetPrimes||0,v=>{if(!S.abf._budgetPrimes)S.abf._budgetPrimes=0;S.abf._budgetPrimes=v;}); w.style.flex='1'; budDiv.appendChild(w);}
+  card.appendChild(budDiv);
+
+  // Notes rapides
+  const notesDiv=document.createElement('div'); notesDiv.style.marginTop='14px';
+  notesDiv.innerHTML='<label class="lbl">Notes de rencontre</label>';
+  const ta=document.createElement('textarea'); ta.className='inp'; ta.rows=3; ta.style.resize='vertical'; ta.placeholder="Points importants de la discussion..."; ta.value=S.notes||'';
+  ta.oninput=e=>{S.notes=e.target.value;};
+  notesDiv.appendChild(ta);
+  card.appendChild(notesDiv);
+  c.appendChild(card);
+
+  c.appendChild(eNavEl(true, true, ()=>showExpressStep(3), ()=>showExpressStep(1)));
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPRESS ÉTAPE 3 — RÉSUMÉ CONDENSÉ (même layout que full)
+// ═══════════════════════════════════════════════════════════
+function renderExpressStep3() {
+  const c=$("step-e3"); c.innerHTML='';
+  c.appendChild(eStepperEl());
+
+  const nom=`${S.vous.prenom||''} ${S.vous.nom||''}`.trim()||'Client';
+  const age=S.vous.dateNaissance?new Date().getFullYear()-new Date(S.vous.dateNaissance).getFullYear():null;
+  const today=new Date().toLocaleDateString("fr-CA",{year:"numeric",month:"long",day:"numeric"});
+  const aC=isConjoint();
+  const fmt=v=>v?new Intl.NumberFormat("fr-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(v):"—";
+
+  // ── HEADER ──────────────────────────────────────────
+  const hCard=document.createElement('div');
+  hCard.style.cssText='background:linear-gradient(135deg,var(--dark) 0%,#1a1a2e 100%);border-radius:14px;padding:22px 26px;margin-bottom:16px;color:white';
+  hCard.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div><div style="font-size:10px;color:var(--gold);letter-spacing:.18em;font-weight:700;text-transform:uppercase">Elevate Capital</div>
+      <div style="font-size:8px;color:rgba(255,255,255,.4);letter-spacing:.1em;text-transform:uppercase">Analyse Express — ${today}</div></div>
+      <span style="font-size:9px;background:var(--gold);color:white;border-radius:8px;padding:2px 9px;font-weight:700">⚡ Express</span>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.1)">
+      <div style="font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Préparé pour</div>
+      <div style="font-size:26px;font-weight:800;color:white">${nom}</div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+        ${age?`<span style="font-size:10px;background:rgba(200,169,81,.2);color:var(--gold);border-radius:20px;padding:2px 9px">${age} ans</span>`:''}
+        ${S.vous.etatCivil?`<span style="font-size:10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);border-radius:20px;padding:2px 9px">${S.vous.etatCivil}</span>`:''}
+        ${S.vous.aEnfants?`<span style="font-size:10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);border-radius:20px;padding:2px 9px">Enfants à charge</span>`:''}
+        ${S._abfResult70?`<span style="font-size:10px;background:rgba(200,169,81,.25);color:var(--gold);border-radius:20px;padding:2px 9px;font-weight:700">Besoin : ${fmt(S._abfResult70)}</span>`:''}
+      </div>
+    </div>`;
+  c.appendChild(hCard);
+
+  // ── GRILLE PROFIL ────────────────────────────────────
+  const profCard=document.createElement('div'); profCard.style.cssText='background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.05)';
+  profCard.innerHTML=`<div style="padding:9px 14px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Profil client</div>`;
+  const profGrid=document.createElement('div'); profGrid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:0';
+  const profItems=[
+    {l:'Revenu annuel',v:fmt((S.vous.revenuEmploi||0)+(S.vous.autresRevenus||0))},
+    {l:'Courriel',v:S.vous.courriel||'—'},
+    {l:'Téléphone',v:S.vous.telCellulaire||'—'},
+    {l:'Tabac',v:S.vous.fumeur?'Fumeur':'Non-fumeur'},
+    {l:'Médical',v:(S.med.conditions||[]).length>0?(S.med.conditions||[]).slice(0,2).join(', ')+(S.med.conditions.length>2?'…':''):'Aucune condition'},
+    {l:'No-exam préféré',v:S.med.preferenceNoExam?'Oui':'Non'},
+  ];
+  if(aC){
+    profItems.push({l:'Conjoint(e)',v:`${S.conjoint.prenom||''} ${S.conjoint.nom||''}`.trim()||'—'});
+    profItems.push({l:'Revenu conjoint',v:fmt(S.conjoint.revenuEmploi||0)});
+    profItems.push({l:'Tabac conjoint',v:S.conjoint.fumeur?'Fumeur':'Non-fumeur'});
+  }
+  profItems.filter(i=>i.v&&i.v!=='—').forEach(item=>{
+    const d=document.createElement('div'); d.style.cssText='padding:8px 12px;border-right:1px solid var(--border);border-bottom:1px solid var(--border)';
+    d.innerHTML=`<div style="font-size:8px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:2px">${item.l}</div><div style="font-size:12px;font-weight:600;color:var(--text)">${item.v}</div>`;
+    profGrid.appendChild(d);
+  });
+  profCard.appendChild(profGrid);
+  c.appendChild(profCard);
+
+  // ── BILAN RAPIDE ─────────────────────────────────────
+  const bilCard=document.createElement('div'); bilCard.style.cssText='background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.05)';
+  bilCard.innerHTML=`<div style="padding:9px 14px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Bilan financier</div>`;
+  const bilGrid=document.createElement('div'); bilGrid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr)';
+  const dettes=(S.passif.soldeHypo||0)+(S.passif.soldeMarge||0);
+  const liquide=(((S.actif.liquidites||0)+(S.actif.reer||0)));
+  [{l:'Revenu mensuel',v:fmt(S.abf.revMensuel||0),c:'var(--green)'},{l:'Dettes',v:fmt(dettes),c:'var(--red)'},{l:'Liquidités',v:fmt(liquide),c:'var(--dark)'},{l:'Besoin protection',v:fmt(S._abfResult70||0),c:'var(--gold-d)'}].forEach(item=>{
+    const d=document.createElement('div'); d.style.cssText='padding:10px 12px;text-align:center;border-right:1px solid var(--border)';
+    d.innerHTML=`<div style="font-size:8px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:3px">${item.l}</div><div style="font-size:15px;font-weight:800;color:${item.c}">${item.v}</div>`;
+    bilGrid.appendChild(d);
+  });
+  bilCard.appendChild(bilGrid);
+  // Protections existantes summary
+  const protSummary=document.createElement('div'); protSummary.style.cssText='padding:8px 14px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;background:var(--bg2)';
+  protSummary.innerHTML='<span style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-right:4px;line-height:22px">Couverture actuelle</span>';
+  [{k:'_activeVie',l:'Vie',icon:'🛡️'},{k:'_activeInv',l:'Invalidité',icon:'🏥'},{k:'_activeMG',l:'MG',icon:'❤️‍🩹'},{k:'_activeCol',l:'Collective',icon:'🏢'}].forEach(({k,l,icon})=>{
+    const on=S[k]===true; const d=document.createElement('span');
+    d.style.cssText=`font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;background:${on?'var(--green)':'#fee2e2'};color:${on?'white':'var(--red)'}`;
+    d.textContent=`${icon} ${l} ${on?'✓':'✕'}`;
+    protSummary.appendChild(d);
+  });
+  bilCard.appendChild(protSummary);
+  c.appendChild(bilCard);
+
+  // ── PRIORITÉS ────────────────────────────────────────
+  if(S.besoins.length>0||S.recs.filter(Boolean).length>0){
+    const prCard=document.createElement('div'); prCard.style.cssText='background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.05)';
+    prCard.innerHTML=`<div style="padding:9px 14px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Objectifs identifiés</div>`;
+    const prBody=document.createElement('div'); prBody.style.cssText='padding:10px 14px;display:flex;flex-direction:column;gap:5px';
+    if(S.recs.filter(Boolean).length>0){
+      prBody.innerHTML='<div style="font-size:10px;font-weight:700;color:var(--gold-d);margin-bottom:4px">Priorités exprimées :</div>';
+      S.recs.filter(Boolean).forEach((p,i)=>{
+        const d=document.createElement('div'); d.style.cssText=`display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;background:${i===0?'var(--gold-bg)':'var(--bg2)'}`;
+        d.innerHTML=`<div style="width:18px;height:18px;border-radius:50%;background:${i===0?'var(--gold)':'var(--border)'};color:${i===0?'white':'var(--muted)'};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0">${i+1}</div><span style="font-size:11px;font-weight:${i===0?700:400};color:var(--text)">${p}</span>`;
+        prBody.appendChild(d);
+      });
+    }
+    if(S.besoins.length>0){
+      const bd=document.createElement('div'); bd.style.cssText='margin-top:8px;display:flex;flex-wrap:wrap;gap:4px';
+      bd.innerHTML='<div style="font-size:10px;font-weight:700;color:var(--muted);width:100%;margin-bottom:3px">Besoins identifiés :</div>';
+      S.besoins.forEach(b=>{const sp=document.createElement('span');sp.style.cssText='font-size:10px;padding:2px 8px;border-radius:8px;background:var(--gold-bg);color:var(--gold-d);font-weight:600';sp.textContent=b;bd.appendChild(sp);});
+      prBody.appendChild(bd);
+    }
+    prCard.appendChild(prBody);
+    c.appendChild(prCard);
+  }
+
+  // ── RECOMMANDATIONS (même logique que full) ──────────
+  const recs=computeRecs().slice(0,5);
+  if(recs.length>0){
+    const recCard=document.createElement('div'); recCard.style.cssText='background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.05)';
+    recCard.innerHTML=`<div style="padding:9px 14px;background:var(--gold-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px"><span style="font-size:13px">✅</span><span style="font-size:11px;font-weight:700;color:var(--gold-d);text-transform:uppercase;letter-spacing:.07em">Plan de protection recommandé</span></div>`;
+    const recBody=document.createElement('div'); recBody.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px';
+    recs.forEach((r,ri)=>{
+      const rCard=document.createElement('div'); rCard.style.cssText=`border-radius:10px;border:1.5px solid ${ri===0?'var(--gold)':'var(--border)'};overflow:hidden;background:${ri===0?'#fffbf0':'white'}`;
+      const rHead=document.createElement('div'); rHead.style.cssText=`display:flex;align-items:center;gap:10px;padding:10px 13px;background:${ri===0?'var(--gold-bg)':'var(--bg2)'}`;
+      rHead.innerHTML=`
+        <div style="width:26px;height:26px;border-radius:50%;background:${ri===0?'var(--gold)':'var(--border)'};color:${ri===0?'white':'var(--muted)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${ri+1}</div>
+        <div style="width:32px;height:32px;border-radius:8px;background:${r.color}18;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">${r.icon}</div>
+        <div style="flex:1"><div style="font-size:12px;font-weight:700;color:var(--text)">${r.name}</div><div style="font-size:10px;color:var(--muted)">${r.description||''}</div></div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          <span style="font-size:10px;background:${r.score>=70?'var(--gold)':r.score>=50?'var(--green)':'var(--border)'};color:${r.score>=50?'white':'var(--muted)'};border-radius:8px;padding:1px 7px;font-weight:700">${r.score}/100</span>
+          ${ri===0?'<span style="font-size:9px;background:var(--gold);color:white;border-radius:8px;padding:1px 7px;font-weight:700">PRIORITÉ #1</span>':''}
+        </div>`;
+      rCard.appendChild(rHead);
+
+      const rBody=document.createElement('div'); rBody.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--border)';
+      // Compagnies
+      const coDiv=document.createElement('div'); coDiv.style.cssText='padding:10px 13px;border-right:1px solid var(--border)';
+      coDiv.innerHTML='<div style="font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Compagnies recommandées</div>';
+      (r.companies||[]).slice(0,3).forEach((co,ci)=>{
+        const row=document.createElement('div'); row.style.cssText=`display:flex;align-items:center;gap:6px;margin-bottom:5px;padding:4px 6px;border-radius:6px;background:${ci===0?'var(--gold-bg)':'transparent'}`;
+        row.innerHTML=`<span style="font-size:10px;color:${co.label==='star'?'var(--gold-d)':'var(--green)'};font-weight:700">${co.label==='star'?'⭐':'✓'}</span><div><div style="font-size:11px;font-weight:${ci===0?700:400};color:var(--text)">${co.name}</div><div style="font-size:9px;color:var(--muted)">${co.strength||''}</div></div>${ci===0?'<span style="margin-left:auto;font-size:8px;background:var(--gold);color:white;border-radius:5px;padding:1px 5px;font-weight:700">TOP</span>':''}`;
+        coDiv.appendChild(row);
+      });
+      rBody.appendChild(coDiv);
+      // Pourquoi + Points forts
+      const rDiv=document.createElement('div'); rDiv.style.cssText='padding:10px 13px';
+      rDiv.innerHTML='<div style="font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Pourquoi ce produit</div>';
+      (r.reasons||[]).slice(0,3).forEach(rs=>{
+        const row=document.createElement('div'); row.style.cssText='display:flex;gap:5px;margin-bottom:4px';
+        row.innerHTML=`<span style="color:var(--gold);font-size:9px;flex-shrink:0;margin-top:2px">▸</span><span style="font-size:10px;color:var(--text);line-height:1.4">${rs}</span>`;
+        rDiv.appendChild(row);
+      });
+      if(r.questions&&r.questions.length>0){
+        rDiv.innerHTML+='<div style="font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-top:8px;margin-bottom:4px">À clarifier</div>';
+        (r.questions||[]).slice(0,2).forEach(q=>{
+          const qr=document.createElement('div'); qr.style.cssText='display:flex;gap:5px;margin-bottom:3px';
+          qr.innerHTML=`<span style="color:var(--muted);font-size:9px;flex-shrink:0;margin-top:2px">?</span><span style="font-size:10px;color:var(--muted);line-height:1.3">${q}</span>`;
+          rDiv.appendChild(qr);
+        });
+      }
+      rBody.appendChild(rDiv);
+      rCard.appendChild(rBody);
+
+      // Badge médical si applicable
+      const medProf=S.med.profil;
+      if(medProf&&medProf!=='standard'){
+        const mb=document.createElement('div'); mb.style.cssText='padding:6px 13px;background:#fff7ed;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px';
+        mb.innerHTML=`<span style="font-size:10px">⚕️</span><span style="font-size:10px;color:#92400e">${medProf==='no-exam'?'Profil no-exam — vérifier limites':medProf==='sous-standard'?'Profil sous-standard — surprime possible':'Profil difficile — consultation souscription'}</span>`;
+        rCard.appendChild(mb);
+      }
+      recBody.appendChild(rCard);
+    });
+    recCard.appendChild(recBody);
+    c.appendChild(recCard);
+  }
+
+  // ── NOTES ────────────────────────────────────────────
+  if(S.notes){
+    const notCard=document.createElement('div'); notCard.style.cssText='background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.05)';
+    notCard.innerHTML=`<div style="padding:9px 14px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Notes de rencontre</div><div style="padding:12px 14px;font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap">${S.notes}</div>`;
+    c.appendChild(notCard);
+  }
+
+  // ── PROCHAINES ÉTAPES ────────────────────────────────
+  const nextCard=document.createElement('div'); nextCard.style.cssText='background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border-radius:12px;padding:16px 18px;border:1px solid #bae6fd;margin-bottom:14px';
+  nextCard.innerHTML=`
+    <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Prochaines étapes</div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${['Obtenir illustrations des compagnies recommandées','Confirmer assurabilité du client','Présenter les options lors de la prochaine rencontre','Compléter l\'analyse complète ABF si nécessaire'].map((s,i)=>`<div style="display:flex;gap:8px"><span style="font-size:10px;background:#0ea5e9;color:white;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;margin-top:1px">${i+1}</span><span style="font-size:11px;color:#0c4a6e">${s}</span></div>`).join('')}
+    </div>`;
+  c.appendChild(nextCard);
+
+  // ── BOUTONS ACTIONS ──────────────────────────────────
+  const btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px';
+  const bPrint=document.createElement('button'); bPrint.className='btn btn-gold'; bPrint.innerHTML='🖨️ Imprimer'; bPrint.onclick=()=>window.print(); btnRow.appendChild(bPrint);
+  const bSave=document.createElement('button'); bSave.className='btn btn-dark'; bSave.innerHTML='💾 Sauvegarder JSON'; bSave.onclick=()=>exportDossier(); btnRow.appendChild(bSave);
+  const bFull=document.createElement('button'); bFull.className='btn'; bFull.innerHTML='📊 Approfondir — Version complète'; bFull.onclick=()=>startFull(); btnRow.appendChild(bFull);
+  const bNew=document.createElement('button'); bNew.className='btn'; bNew.style.marginLeft='auto';
+  bNew.innerHTML='← Nouveau client';
+  bNew.onclick=()=>{Object.assign(S,{vous:emptyPers(),conjoint:emptyPers(),med:emptyMed(),medC:emptyMed(),enfants:[{prenom:'',dateNaissance:''}],abf:{taux:5,duree:20,dureeC:20,revMensuel:0,revMensuelC:0,rrenteRRQ:0,rrenteRRQC:0},passif:emptyPassif(),actif:emptyActif(),_activeVie:null,_activeVieC:null,_activeInv:null,_activeInvC:null,_activeMG:null,_activeMGC:null,_activeCol:null,recs:[],selRecs:[],besoins:[],notes:'',prioritesObjectifs:[...S.prioritesObjectifs]});showLanding();};
+  btnRow.appendChild(bNew);
+  c.appendChild(btnRow);
+
+  // Pied de page
+  const footer=document.createElement('div'); footer.style.cssText='text-align:center;padding:16px;font-size:10px;color:var(--muted);border-top:1px solid var(--border);margin-top:8px';
+  footer.innerHTML=`Vincent Froment · <a href="mailto:vincent@elevate-capital.com" style="color:var(--gold)">vincent@elevate-capital.com</a> · <a href="https://elevate-capital.com/rencontre" style="color:var(--gold)" target="_blank">Prendre rendez-vous</a><br><span style="font-size:9px;color:var(--muted);margin-top:3px;display:block">Document confidentiel — Usage interne Elevate Capital</span>`;
+  c.appendChild(footer);
+}
+
+// ─── HELPERS EXPRESS ────────────────────────────────────────
+function eStepperEl() {
+  const wrap=document.createElement('div'); wrap.style.cssText='display:flex;align-items:center;gap:0;margin-bottom:18px;background:white;border-radius:10px;padding:10px 14px;border:1px solid var(--border);overflow-x:auto';
+  const backBtn=document.createElement('button'); backBtn.className='btn'; backBtn.style.cssText='font-size:10px;padding:4px 10px;margin-right:12px;flex-shrink:0';
+  backBtn.innerHTML='← Menu'; backBtn.onclick=()=>showLanding(); wrap.appendChild(backBtn);
+  const badge=document.createElement('span'); badge.style.cssText='font-size:9px;background:var(--gold);color:white;border-radius:8px;padding:2px 8px;font-weight:700;margin-right:12px;flex-shrink:0';
+  badge.textContent='⚡ Express'; wrap.appendChild(badge);
+  ESTEPS.forEach((s,i)=>{
+    if(i>0){const sep=document.createElement('div');sep.style.cssText='width:24px;height:2px;background:var(--border);flex-shrink:0';wrap.appendChild(sep);}
+    const d=document.createElement('div'); d.style.cssText='display:flex;align-items:center;gap:5px;flex-shrink:0;cursor:'+(i<=expressStep?'pointer':'default');
+    d.innerHTML=`<div style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;background:${i<expressStep?'var(--gold)':i===expressStep?'var(--dark)':'var(--bg2)'};color:${i<expressStep?'white':i===expressStep?'white':'var(--muted)'}">${i<expressStep?'✓':i+1}</div><span style="font-size:11px;font-weight:${i===expressStep?700:400};color:${i===expressStep?'var(--dark)':'var(--muted)'}">${s}</span>`;
+    if(i<expressStep) d.onclick=()=>showExpressStep(i);
+    wrap.appendChild(d);
+  });
+  return wrap;
+}
+
+function eNavEl(hasPrev, hasNext, nextFn, prevFn) {
+  const row=document.createElement('div'); row.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:10px';
+  const left=document.createElement('div');
+  if(hasPrev){const b=document.createElement('button');b.className='btn';b.innerHTML='← Retour';b.onclick=prevFn||null;left.appendChild(b);}
+  row.appendChild(left);
+  if(hasNext){const b=document.createElement('button');b.className='btn btn-gold';b.style.fontSize='13px';b.innerHTML=expressStep>=2?'Voir le résumé ✓':'Continuer →';b.onclick=nextFn||null;row.appendChild(b);}
+  return row;
+}
+
 function renderAll(){
   try{ renderStepper(); }catch(e){console.error("STEPPER:",e);}
   try{ renderStep0(); }catch(e){console.error("STEP0:",e);}
@@ -2531,7 +3185,7 @@ function renderAll(){
   try{ renderStep7(); }catch(e){console.error("STEP7:",e);}
   showStep(currentStep); updateHdr();
 }
-renderAll();
+showLanding();
 </script>
 </body>
 </html>
