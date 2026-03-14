@@ -179,6 +179,12 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 /* ── PROGRESS BAR ── */
 .pbar{background:var(--bg);border-radius:6px;height:8px;overflow:hidden}
 .pbar-fill{height:8px;background:var(--gold);border-radius:6px;transition:width .4s}
+
+.tip{position:relative;display:inline-flex;align-items:center;cursor:help}
+.tip::after{content:attr(data-tip);position:absolute;bottom:calc(100%% + 6px);left:50%%;transform:translateX(-50%%);background:#1a1a2e;color:white;font-size:10px;padding:6px 10px;border-radius:7px;white-space:normal;max-width:240px;line-height:1.4;z-index:9999;opacity:0;pointer-events:none;transition:opacity .15s;font-weight:400;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.tip::before{content:"";position:absolute;bottom:calc(100%% + 1px);left:50%%;transform:translateX(-50%%);border:4px solid transparent;border-top-color:#1a1a2e;z-index:9999;opacity:0;pointer-events:none;transition:opacity .15s}
+.tip:hover::after,.tip:hover::before{opacity:1}
+.tip-icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%%;background:var(--gold);color:white;font-size:8px;font-weight:800;margin-left:4px;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -198,6 +204,17 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
     <label class="btn btn-dark" style="cursor:pointer">📂 Charger<input type="file" accept=".json" style="display:none" onchange="importDossier(event)"></label>
     <button class="btn btn-dark" onclick="openAdmin()">⚙️ Préférences</button>
     <button class="btn btn-dark" onclick="window.print()">🖨️ Imprimer</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <!-- Timer de rencontre -->
+      <div style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px 8px;">
+        <span style="font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.05em">Durée</span>
+        <span id="hdr-timer" style="font-size:12px;font-weight:700;color:var(--gold);min-width:36px">00:00</span>
+        <button id="timer-btn" onclick="startTimer()" title="Démarrer" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:11px;padding:0 2px">▶</button>
+        <button onclick="resetTimer()" title="Reset" style="background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:9px;padding:0">↺</button>
+      </div>
+      <!-- Auto-save badge -->
+      <div id="hdr-autosave" style="font-size:10px;color:rgba(255,255,255,.35)">—</div>
+    </div>
     <div style="text-align:right">
       <div id="hdr-stats" style="font-size:11px;color:var(--gold);font-weight:600"></div>
       <div id="hdr-upd" style="font-size:10px;color:var(--light)"></div>
@@ -209,6 +226,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 <div style="max-width:1120px;margin:0 auto;padding:20px 16px">
   <!-- LANDING / CHOIX DE MODE -->
   <div id="landing" style="display:none"></div>
+  <!-- COMPARATEUR -->
+  <div id="comp-container" style="display:none"></div>
   <div class="stepper no-print" id="stepper" style="display:none"></div>
   <div id="step-0" style="display:none"></div>
   <div id="step-1" style="display:none"></div>
@@ -252,6 +271,10 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-of
 </div>
 
 <script>
+window.onerror = function(msg, src, line, col, err) {
+  console.error("JS ERROR:", msg, "ligne", line, err);
+  return false;
+};
 
   // ── MOT DE PASSE ──
   (function(){
@@ -473,7 +496,9 @@ let S={
   riskAns:{},riskResult:null,
   besoins:[],notes:"",
   recs:[],selRecs:[],
-  stepErrors:{}
+  stepErrors:{},
+  dateRencontre:"",
+  heureRencontre:""
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -499,6 +524,7 @@ function showStep(n){
   currentStep=n; renderStepper(); window.scrollTo(0,0);
   // Re-render l'étape active pour refléter les données à jour
   const renders=[renderStep0,renderStep1,renderStep2,renderStep3,renderStep4,renderStep5,renderStep6,renderStep7];
+  autoSaveDossier();
   try{ renders[n]&&renders[n](); }catch(e){ console.error("showStep render:",e); }
 }
 function navigate(dir){
@@ -516,6 +542,25 @@ function validateStep0(){
   renderStep0(); return Object.keys(S.stepErrors).length===0;
 }
 
+const TOOLTIPS = {
+  "ABF": "Analyse des Besoins Financiers — méthode pour calculer le capital décès nécessaire au remplacement du revenu.",
+  "PAR": "Vie Participante — assurance permanente qui verse des dividendes annuels et accumule une valeur de rachat.",
+  "CSV": "Cash Surrender Value (Valeur de rachat) — montant récupérable si on met fin au contrat d'assurance.",
+  "CDC": "Compte de dividendes en capital — permet de retirer des sommes non imposables d'une corporation.",
+  "CPAS": "Coût pur d'assurance — portion de la prime couvrant le risque de décès, excluant la composante épargne.",
+  "Carence": "Délai d'attente avant que les prestations d'invalidité débutent (généralement 30 à 180 jours).",
+  "Propre occupation": "Définition la plus favorable — prestation versée si incapable d'exercer SA propre profession.",
+  "Avenant": "Clause additionnelle qui modifie ou étend les garanties d'un contrat d'assurance (rider).",
+  "No-exam": "Émission sans examen médical — processus simplifié avec limites de montant selon la compagnie.",
+  "Sous-standard": "Profil médical à risque élevé — surprime possible ou exclusion de certaines conditions.",
+  "Valeur de rachat": "Épargne accumulée dans un contrat permanent, accessible via avance sur police ou rachat.",
+  "Maladies graves": "Versement forfaitaire à la survie d'une maladie grave définie (cancer, AVC, infarctus, etc.).",
+  "Invalidité": "Remplacement d'une portion du revenu (50-80%) si incapacité de travailler pour maladie ou accident."
+};
+function tipIcon(term) {
+  var tip = TOOLTIPS[term]; if(!tip) return '';
+  return ' <span class="tip" data-tip="' + tip.replace(/"/g,"'") + '"><span class="tip-icon">?</span></span>';
+}
 function makeSecHead(title,subtitle,barClass){
   const d=document.createElement("div"); d.className="sec-head";
   d.innerHTML=`<div class="sec-head-bar ${barClass||""}"></div><div class="sec-head-inner"><div class="sec-head-title">${title}</div>${subtitle?`<div class="sec-head-sub">${subtitle}</div>`:""}</div>`;
@@ -580,14 +625,51 @@ function navRow(hasPrev,hasNext,prevFn,nextFn,errMsg){
 // STEPPER
 // ═══════════════════════════════════════════════════════════
 const STEPS=["Profil","Bilan ABF","Calcul ABF","Protections","Profil risque","Besoins / Priorités","Recommandations","Résumé"];
+function getStepCompletion(step) {
+  const checks = [
+    // Étape 0 : Profil
+    ()=>{ let f=0,t=4;
+      if(S.vous.nom) f++; if(S.vous.prenom) f++; if(S.vous.dateNaissance) f++; if(S.vous.revenuEmploi>0) f++;
+      return Math.round(f/t*100); },
+    // Étape 1 : Bilan
+    ()=>{ let f=0,t=3;
+      const tA=Object.values(S.actif).reduce((a,b)=>a+b,0);
+      const tP=Object.values(S.passif).reduce((a,b)=>a+b,0);
+      if(tA>0)f++; if(tP>0)f++; if(S.abf.revMensuel>0)f++;
+      return Math.round(f/t*100); },
+    // Étape 2 : Calcul ABF — toujours complet si étape 1 faite
+    ()=>S.abf.revMensuel>0?100:0,
+    // Étape 3 : Protections
+    ()=>{ let f=0,t=3;
+      if(S._activeVie!==null)f++; if(S._activeInv!==null)f++; if(S._activeMG!==null)f++;
+      return Math.round(f/t*100); },
+    // Étape 4 : Profil risque
+    ()=>{ const n=Object.keys(S.riskAns).length; return Math.min(100,Math.round(n/12*100)); },
+    // Étape 5 : Besoins
+    ()=>{ let f=0,t=2; if(S.besoins.length>0)f++; if(S.prioritesObjectifs.length>0)f++; return Math.round(f/t*100); },
+    // Étape 6 : Recommandations
+    ()=>S.selRecs.length>0?100:S.recs.length>0?50:0,
+    // Étape 7 : Résumé — toujours accessible
+    ()=>100
+  ];
+  try { return checks[step] ? checks[step]() : 0; } catch(e){ return 0; }
+}
+
 function renderStepper(){
   const c=$("stepper"); c.innerHTML="";
   STEPS.forEach((s,i)=>{
     if(i>0){const sep=document.createElement("div");sep.className="step-sep";c.appendChild(sep);}
     const d=document.createElement("div");
+    const pct=getStepCompletion(i);
     d.className="step-item"+(i===currentStep?" active":i<currentStep?" done":"");
+    // Badge complétion
+    const pctBadge=document.createElement("div");
+    pctBadge.style.cssText="position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:8px;font-weight:700;white-space:nowrap;color:"+(pct===100?"var(--green)":pct>0?"var(--gold-d)":"var(--muted)");
+    pctBadge.textContent=pct===100?"✓":pct>0?pct+"%":"";
+    d.style.position="relative";
     d.innerHTML=`<div class="step-circle">${i<currentStep?"✓":i+1}</div><span class="step-label">${s}</span>`;
     d.onclick=()=>{if(i<=currentStep)showStep(i);};
+    d.appendChild(pctBadge);
     c.appendChild(d);
   });
 }
@@ -601,6 +683,23 @@ function renderStep0(){
   // ── 1 — VOUS ──
   const cardVous=document.createElement("div"); cardVous.className="card";
   cardVous.appendChild(makeSecHead("1 — Vous","Informations personnelles et coordonnées"));
+
+  // ── Date de rencontre ──
+  const dateRencDiv=document.createElement("div"); dateRencDiv.style.cssText="display:flex;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--gold-bg);border-radius:9px;border:1px solid var(--gold);margin-bottom:12px;align-items:center";
+  dateRencDiv.innerHTML='<span style="font-size:11px;font-weight:700;color:var(--gold-d)">📅 Rencontre</span>';
+  const dateInp=document.createElement("input"); dateInp.type="date"; dateInp.className="inp"; dateInp.style.cssText="flex:1;min-width:120px;font-size:12px";
+  dateInp.value=S.dateRencontre||(()=>{const d=new Date();return d.toISOString().split("T")[0];})();
+  if(!S.dateRencontre) S.dateRencontre=dateInp.value;
+  dateInp.oninput=e=>S.dateRencontre=e.target.value;
+  const heureInp=document.createElement("input"); heureInp.type="time"; heureInp.className="inp"; heureInp.style.cssText="flex:1;min-width:90px;font-size:12px";
+  heureInp.value=S.heureRencontre||(()=>{const d=new Date();return d.toTimeString().slice(0,5);})();
+  if(!S.heureRencontre) S.heureRencontre=heureInp.value;
+  heureInp.oninput=e=>S.heureRencontre=e.target.value;
+  const timerStartBtn=document.createElement("button"); timerStartBtn.className="btn btn-gold"; timerStartBtn.style.cssText="font-size:10px;padding:4px 10px";
+  timerStartBtn.textContent=_timerRunning?"⏸ Pause":"▶ Démarrer chrono";
+  timerStartBtn.onclick=()=>{startTimer();renderStep0();};
+  dateRencDiv.appendChild(dateInp); dateRencDiv.appendChild(heureInp); dateRencDiv.appendChild(timerStartBtn);
+  cardVous.appendChild(dateRencDiv);
 
   // ── Identité ──
   const g1=document.createElement("div"); g1.className="g3";
@@ -2126,6 +2225,7 @@ function renderStep7(){
   const sCoord=makeSection("👤","Profil client");
   const coordGrid=document.createElement("div"); coordGrid.style.cssText="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px";
   const coordItems=[
+    {l:"Date de rencontre",v:S.dateRencontre?(new Date(S.dateRencontre).toLocaleDateString("fr-CA",{year:"numeric",month:"long",day:"numeric"}))+(S.heureRencontre?" à "+S.heureRencontre:""):"—"},
     {l:"Nom complet",v:nom},
     {l:"Date de naissance",v:S.vous.dateNaissance?new Date(S.vous.dateNaissance).toLocaleDateString("fr-CA"):"—"},
     {l:"État civil",v:S.vous.etatCivil||"—"},
@@ -2547,6 +2647,7 @@ function showLanding() {
   for(let i=0;i<8;i++){const d=$("step-"+i);if(d)d.style.display='none';}
   ['e0','e1','e2','e3'].forEach(s=>{const d=$("step-"+s);if(d)d.style.display='none';});
   $("landing").style.display='block';
+  const _cc=$("comp-container");if(_cc)_cc.style.display='none';
   renderLanding();
 }
 
@@ -2594,7 +2695,7 @@ function renderLanding() {
     <div style="font-size:13px;color:var(--muted)">Choisissez le type d'analyse selon la situation</div>`;
   wrap.appendChild(hero);
 
-  const cards=document.createElement('div'); cards.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px';
+  const cards=document.createElement('div'); cards.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;max-width:680px;width:100%';
 
   // Card Express
   const cEx=document.createElement('div');
@@ -2628,6 +2729,72 @@ function renderLanding() {
   cFull.onmouseleave=()=>{cFull.style.borderColor='var(--border)';cFull.style.transform='';};
   cards.appendChild(cFull);
   wrap.appendChild(cards);
+
+  // Card Comparateur
+  const cComp=document.createElement('div');
+  cComp.style.cssText='border:2px solid var(--border);border-radius:14px;padding:24px 20px;cursor:pointer;background:white;transition:all .15s;text-align:center;grid-column:span 2';
+  // Ligne texte du comparateur
+  const compPills=['Vie temporaire','Vie participante','Maladies graves','Invalidité'].map(t=>`<span style="font-size:10px;background:var(--bg2);color:var(--muted);border-radius:6px;padding:1px 7px;border:1px solid var(--border)">${t}</span>`).join('');
+  cComp.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap">
+      <div style="font-size:26px">⚖️</div>
+      <div style="text-align:left">
+        <div style="font-size:14px;font-weight:800;color:var(--dark);margin-bottom:3px">Comparateur de produits</div>
+        <div style="font-size:11px;color:var(--muted)">Comparez les compagnies côte-à-côte · Tableau + fiche client imprimable</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-left:auto">${compPills}</div>
+    </div>`;
+  // Bouton ajouté séparément pour éviter problème event
+  const compBtn=document.createElement('button'); compBtn.className='btn btn-dark'; compBtn.style.cssText='font-size:12px;margin-top:10px;width:100%';
+  compBtn.textContent='⚖️ Ouvrir le comparateur →';
+  compBtn.addEventListener('click', function(e){ e.stopPropagation(); startComparateur(); });
+  cComp.appendChild(compBtn);
+  cComp.addEventListener('click', function(e){ if(e.target===compBtn||e.target.closest('button')===compBtn) return; startComparateur(); });
+  cComp.onmouseenter=()=>{cComp.style.borderColor='var(--dark)';cComp.style.transform='translateY(-1px)';};
+  cComp.onmouseleave=()=>{cComp.style.borderColor='var(--border)';cComp.style.transform='';};
+  cards.appendChild(cComp);
+
+  // Multi-dossiers — historique récent
+  try {
+    const hist = JSON.parse(localStorage.getItem('ec_dossier_history')||'[]');
+    if(hist.length > 0) {
+      const histDiv=document.createElement('div'); histDiv.style.cssText='margin-bottom:16px';
+      histDiv.innerHTML='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">📁 Dossiers récents</div>';
+      const histList=document.createElement('div'); histList.style.cssText='display:flex;flex-direction:column;gap:5px';
+      hist.slice(0,5).forEach((h,i)=>{
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 12px;background:white;border-radius:9px;border:1px solid var(--border);cursor:pointer;transition:all .1s';
+        row.onmouseenter=()=>{row.style.borderColor='var(--gold)';row.style.background='var(--gold-bg)';};
+        row.onmouseleave=()=>{row.style.borderColor='var(--border)';row.style.background='white';};
+        row.innerHTML=`
+          <div style="width:28px;height:28px;border-radius:50%;background:var(--gold-bg);border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--gold-d);flex-shrink:0">${(h.nom||'?').trim()[0]||'?'}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:700;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.nom||'Client sans nom'}</div>
+            <div style="font-size:10px;color:var(--muted)">${h.date||''} ${h.heure?'· '+h.heure:''}</div>
+          </div>
+          <button class="btn" style="font-size:10px;padding:3px 9px;flex-shrink:0">Ouvrir →</button>
+          <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 5px;flex-shrink:0" title="Supprimer">✕</button>`;
+        // Bouton ouvrir
+        row.querySelectorAll('button')[0].addEventListener('click', (e)=>{
+          e.stopPropagation();
+          try{ const d=JSON.parse(h.snapshot); Object.assign(S,d); startFull(); }catch(err){ alert('Erreur chargement: '+err.message); }
+        });
+        // Bouton supprimer
+        row.querySelectorAll('button')[1].addEventListener('click', (e)=>{
+          e.stopPropagation();
+          const newHist=hist.filter((_,j)=>j!==i);
+          localStorage.setItem('ec_dossier_history', JSON.stringify(newHist));
+          renderLanding();
+        });
+        row.addEventListener('click', ()=>{
+          try{ const d=JSON.parse(h.snapshot); Object.assign(S,d); startFull(); }catch(err){ alert('Erreur: '+err.message); }
+        });
+        histList.appendChild(row);
+      });
+      histDiv.appendChild(histList);
+      wrap.appendChild(histDiv);
+    }
+  } catch(e){ console.error('Historique error:', e); }
 
   // Charger dossier
   const ld=document.createElement('div'); ld.style.cssText='text-align:center;padding:14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)';
@@ -3173,6 +3340,611 @@ function eNavEl(hasPrev, hasNext, nextFn, prevFn) {
   return row;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// COMPARATEUR VISUEL — Elevate Capital
+// Intégré dans l'app principale — accessible depuis le landing
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Tables de primes estimées ($/mois) ──────────────────────────────
+// Source: barèmes indicatifs marché canadien 2024-2025
+// Format: [non-fumeur, fumeur]
+const PRIME_TABLES = {
+
+  // VIE TEMPORAIRE T10 — 250 000$
+  "Vie temporaire T10 250k": {
+    20: [12, 22], 25: [14, 26], 30: [17, 33], 35: [22, 44],
+    40: [34, 68], 45: [55, 115], 50: [92, 195], 55: [155, 330]
+  },
+  // VIE TEMPORAIRE T20 — 250 000$
+  "Vie temporaire T20 250k": {
+    20: [18, 38], 25: [22, 45], 30: [28, 58], 35: [38, 82],
+    40: [62, 135], 45: [105, 230], 50: [175, 385], 55: [295, 640]
+  },
+  // VIE TEMPORAIRE T20 — 500 000$
+  "Vie temporaire T20 500k": {
+    20: [32, 68], 25: [38, 82], 30: [48, 105], 35: [68, 148],
+    40: [115, 255], 45: [195, 440], 50: [330, 740], 55: [560, 1200]
+  },
+  // VIE PERMANENTE PAR — 250 000$
+  "Vie participante 250k": {
+    20: [185, 280], 25: [220, 335], 30: [270, 415], 35: [335, 520],
+    40: [425, 660], 45: [560, 875], 50: [760, 1190], 55: [1050, 1640]
+  },
+  // MALADIES GRAVES T20 — 100 000$
+  "Maladies graves T20 100k": {
+    20: [38, 72], 25: [45, 88], 30: [58, 112], 35: [78, 155],
+    40: [118, 235], 45: [185, 372], 50: [295, 595], 55: [480, 970]
+  },
+  // INVALIDITÉ — 60% revenu — durée 2 ans
+  "Invalidité 60% 2ans": {
+    20: [45, 82], 25: [52, 95], 30: [65, 118], 35: [88, 162],
+    40: [125, 232], 45: [185, 345], 50: [270, 505], 55: [398, 745]
+  },
+  // INVALIDITÉ — 60% revenu — durée 65 ans
+  "Invalidité 60% 65ans": {
+    20: [88, 162], 25: [105, 192], 30: [132, 242], 35: [172, 318],
+    40: [235, 435], 45: [338, 625], 50: [485, 900], 55: [705, 1310]
+  }
+};
+
+// ── Forces distinctives par compagnie/produit ────────────────────────
+const COMP_STRENGTHS = {
+  "Manuvie": {
+    "Vie temporaire": { score: 92, forces: ["CoverMe no-exam en ligne", "Prix parmi les plus compétitifs", "Convertible jusqu'à 70 ans"], delai: "24-48h (no-exam) / 2-4 sem." },
+    "Vie participante": { score: 88, forces: ["Dividendes historiques élevés", "Flexibilité primes", "Fonds seg disponibles"], delai: "3-6 semaines" },
+    "Maladies graves": { score: 85, forces: ["Vaste gamme de maladies couvertes", "Option remboursement primes", "Définitions larges"], delai: "2-4 semaines" },
+    "Invalidité": { score: 80, forces: ["Définition propre occupation", "Riders disponibles", "Bon réseau médecins"], delai: "2-4 semaines" }
+  },
+  "Canada Vie": {
+    "Vie temporaire": { score: 90, forces: ["Taux non-fumeurs parmi les meilleurs", "Grandes sommes assurées", "Très solide financièrement"], delai: "2-4 semaines" },
+    "Vie participante": { score: 95, forces: ["Leader #1 PAR au Canada", "Dividendes stables 100+ ans", "Sécure Plus — garantie croissance"], delai: "3-6 semaines" },
+    "Maladies graves": { score: 88, forces: ["Large couverture maladies", "Retour primes à 15 ans", "Produits flexibles"], delai: "2-4 semaines" },
+    "Invalidité": { score: 85, forces: ["Produits profession libérale", "Définition propre occupation", "Couverture résiduelle"], delai: "2-4 semaines" }
+  },
+  "iA Groupe Financier": {
+    "Vie temporaire": { score: 91, forces: ["Prix agressif marché QC", "Accès Vie no-exam 500k$", "Service en français excellent"], delai: "24h (no-exam) / 1-3 sem." },
+    "Vie participante": { score: 87, forces: ["Forte présence QC", "Dividendes compétitifs", "Options personnalisation élevées"], delai: "3-5 semaines" },
+    "Maladies graves": { score: 82, forces: ["Prix compétitif", "Gamme complète adultes/enfants", "Option retour primes"], delai: "2-3 semaines" },
+    "Invalidité": { score: 88, forces: ["Spécialiste marché QC", "Définitions avantageuses", "Primes stables long terme"], delai: "2-3 semaines" }
+  },
+  "Sun Life": {
+    "Vie temporaire": { score: 88, forces: ["Convertibilité excellente", "Robuste grandes sommes", "Service numérique avancé"], delai: "2-4 semaines" },
+    "Vie participante": { score: 90, forces: ["Sunlife Par — dividendes solides", "Options avancées", "Fonds seg premium"], delai: "3-6 semaines" },
+    "Maladies graves": { score: 90, forces: ["Parmi les meilleures définitions", "37 maladies couvertes", "Remboursement primes robuste"], delai: "2-4 semaines" },
+    "Invalidité": { score: 82, forces: ["Bonne couverture professionnelle", "Flexibilité avenant", "Solide financièrement"], delai: "2-4 semaines" }
+  },
+  "Assomption Vie": {
+    "Vie temporaire": { score: 86, forces: ["Spécialiste no-exam #1 QC", "FlexTerm sans examen", "Émission ultra-rapide"], delai: "24-48h (no-exam)" },
+    "Vie participante": { score: 75, forces: ["Mutuelle francophone", "Service personnalisé QC", "Tarifs compétitifs"], delai: "3-5 semaines" },
+    "Maladies graves": { score: 72, forces: ["Option no-exam disponible", "Marché QC francophone", "Service personnalisé"], delai: "1-3 semaines" },
+    "Invalidité": { score: 70, forces: ["Offre de base solide", "Service QC francophone", "Accessible PME"], delai: "2-3 semaines" }
+  },
+  "Plan de Protection du Canada": {
+    "Vie temporaire": { score: 89, forces: ["No-exam jusqu'à 1 000 000$", "Accepte 18-80 ans", "Processus 100% en ligne"], delai: "24-72h" },
+    "Vie participante": { score: 0, forces: [], delai: "N/A" },
+    "Maladies graves": { score: 0, forces: [], delai: "N/A" },
+    "Invalidité": { score: 0, forces: [], delai: "N/A" }
+  },
+  "Empire Vie": {
+    "Vie temporaire": { score: 82, forces: ["Bonne option petits capitaux", "Prix honorable", "Service stable"], delai: "2-3 semaines" },
+    "Vie participante": { score: 85, forces: ["Frais gestion très bas", "Flexibilité remboursements", "Bonne valeur long terme"], delai: "3-5 semaines" },
+    "Maladies graves": { score: 80, forces: ["Prix compétitif", "Couverture complète", "Bonne accessibilité"], delai: "2-3 semaines" },
+    "Invalidité": { score: 78, forces: ["Tarifs raisonnables", "Produits solides", "Bonne définition"], delai: "2-3 semaines" }
+  },
+  "Humania": {
+    "Vie temporaire": { score: 84, forces: ["No-exam jusqu'à 300 000$", "Souscription en ligne rapide", "Prix compétitif no-exam"], delai: "24-48h (no-exam)" },
+    "Vie participante": { score: 0, forces: [], delai: "N/A" },
+    "Maladies graves": { score: 78, forces: ["Gamme simplifiée accessible", "Prix abordable", "No-exam disponible"], delai: "1-2 semaines" },
+    "Invalidité": { score: 80, forces: ["Invalidité simplifiée accessible", "No-exam disponible", "Prix compétitif"], delai: "1-2 semaines" }
+  },
+  "Beneva": {
+    "Vie temporaire": { score: 83, forces: ["Solidité financière (fusion Desjardins Assurances+SSQ)", "Forte présence QC", "Bon service francophone"], delai: "2-4 semaines" },
+    "Vie participante": { score: 82, forces: ["PAR compétitif marché QC", "Dividendes stables", "Valeurs garanties solides"], delai: "3-5 semaines" },
+    "Maladies graves": { score: 80, forces: ["Bonne couverture", "Prix marché QC", "Service français"], delai: "2-4 semaines" },
+    "Invalidité": { score: 84, forces: ["Spécialiste professions QC", "Définitions favorables", "Bonne couverture collective"], delai: "2-4 semaines" }
+  },
+  "RBC Assurances": {
+    "Vie temporaire": { score: 85, forces: ["Accessible en ligne", "Tarifs très compétitifs", "Réseau bancaire intégré"], delai: "2-3 semaines" },
+    "Vie participante": { score: 78, forces: ["Produit solide", "Réseau RBC", "Fiabilité bancaire"], delai: "3-5 semaines" },
+    "Maladies graves": { score: 82, forces: ["Bonne couverture bancaire", "Prix accessible", "Processus simplifié"], delai: "2-3 semaines" },
+    "Invalidité": { score: 79, forces: ["Accessible réseau bancaire", "Prix compétitif", "Produit simple"], delai: "2-3 semaines" }
+  }
+};
+
+// ── Avenants & Garanties supplémentaires ─────────────────────────────
+const AVENANTS = {
+  "Vie temporaire": [
+    { nom: "Convertibilité garantie", desc: "Conversion en permanente sans preuve médicale", companies: ["Canada Vie","Manuvie","Sun Life","iA"], impact: "+5-15$/mois" },
+    { nom: "Remboursement de primes (ROP)", desc: "Récupère 100% des primes si pas de réclamation", companies: ["Canada Vie","Sun Life","Manuvie"], impact: "+40-80%" },
+    { nom: "Indexation automatique", desc: "Capital augmente avec l'inflation (3%/an)", companies: ["Canada Vie","Manuvie","iA","Sun Life"], impact: "+8-15%" },
+    { nom: "Protection invalidité (waiver)", desc: "Primes exonérées si invalidité totale", companies: ["Manuvie","Canada Vie","iA","Sun Life","Empire Vie"], impact: "+3-8%" }
+  ],
+  "Vie participante": [
+    { nom: "Avance sur police", desc: "Accès CSV sans intérêts élevés", companies: ["Canada Vie","Sun Life","Manuvie"], impact: "Inclus" },
+    { nom: "Acompte de dividendes", desc: "Option versement annuel dividendes en cash", companies: ["Canada Vie","Manuvie","Sun Life","Beneva"], impact: "Inclus" },
+    { nom: "Option achats payés réduits", desc: "Réduction couverture en échange fin des primes", companies: ["Canada Vie","Manuvie","Sun Life"], impact: "Inclus" },
+    { nom: "Avenant maladies graves", desc: "Ajouter MG sur la même police", companies: ["Canada Vie","Manuvie","Sun Life","iA"], impact: "+selon capital" }
+  ],
+  "Maladies graves": [
+    { nom: "Retour des primes au décès", desc: "Héritiers récupèrent 100% des primes payées", companies: ["Canada Vie","Sun Life","Manuvie","iA"], impact: "+20-35%" },
+    { nom: "Retour des primes à 15 ans", desc: "Option rachat primes si pas de réclamation", companies: ["Canada Vie","Sun Life","Manuvie"], impact: "+35-55%" },
+    { nom: "Couverture enfants incluse", desc: "Enfants couverts pour 10 maladies sans frais add.", companies: ["Canada Vie","Sun Life","iA","Manuvie"], impact: "Souvent inclus" },
+    { nom: "Transition à l'âge adulte", desc: "Enfant peut garder couverture à 25 ans sans exam", companies: ["Canada Vie","Sun Life"], impact: "Inclus" }
+  ],
+  "Invalidité": [
+    { nom: "Propre occupation", desc: "Indemnité si incapable d'exercer SA propre profession", companies: ["Canada Vie","Manuvie","Sun Life","iA","Beneva"], impact: "Essentiel" },
+    { nom: "Résiduelle / partielle", desc: "Indemnité partielle si revenu réduit de 20%+", companies: ["Canada Vie","Manuvie","Sun Life","iA"], impact: "+10-20%" },
+    { nom: "Indexation ICRA", desc: "Prestations augmentent avec l'inflation pendant invalidité", companies: ["Canada Vie","Manuvie","Sun Life","iA"], impact: "+8-15%" },
+    { nom: "Remboursement primes (RROP)", desc: "Récupère primes si peu ou pas de réclamations", companies: ["Canada Vie","Sun Life","iA"], impact: "+15-30%" }
+  ]
+};
+
+// ── Fonctions de calcul ──────────────────────────────────────────────
+function getPrime(produitKey, age, fumeur, capital, sexe, pctInv) {
+  const table = PRIME_TABLES[produitKey];
+  if (!table) return null;
+  const ages = Object.keys(table).map(Number).sort((a,b)=>a-b);
+  let ageRef = ages[0];
+  for (const a of ages) { if (a <= age) ageRef = a; }
+  const [nf, f] = table[ageRef];
+  const base = fumeur ? f : nf;
+  // Facteur sexe : femmes ~15% moins cher vie temporaire, ~20% moins cher invalidité
+  const sexeFactor = (sexe||'M')==='F' ? (produitKey.includes('nvalidit')? 0.80 : 0.88) : 1.0;
+  // Facteur % remplacement revenu pour invalidité
+  const pctFactor = produitKey.includes('nvalidit') ? ((pctInv||60)/60) : 1.0;
+  // Ajuster selon capital demandé vs capital de référence
+  const refCapital = produitKey.includes('500k') ? 500000 : produitKey.includes('250k') ? 250000 : produitKey.includes('100k') ? 100000 : 250000;
+  return Math.round(base * (capital / refCapital) * sexeFactor * pctFactor);
+}
+
+function getAgeRef(dateNaissance) {
+  if (!dateNaissance) return 35;
+  return Math.max(20, Math.min(55, new Date().getFullYear() - new Date(dateNaissance).getFullYear()));
+}
+
+// ── Rendu principal du comparateur ──────────────────────────────────
+function renderComparateur() {
+  const c = $("comp-container"); if (!c) return;
+  c.innerHTML = '';
+
+  const age = S._compAge || getAgeRef(S.vous.dateNaissance);
+  const fumeur = S._compFumeur !== undefined ? S._compFumeur : !!S.vous.fumeur;
+  const revenu = S._compRevenu || (S.vous.revenuEmploi || 0) + (S.vous.autresRevenus || 0);
+  const besoinVie = S._abfResult70 || Math.round(revenu * 8);
+  const fmt = v => v ? new Intl.NumberFormat("fr-CA", {style:"currency",currency:"CAD",maximumFractionDigits:0}).format(v) : "—";
+
+  // ── En-tête comparateur ──
+  const header = document.createElement('div');
+  header.style.cssText = 'margin-bottom:20px';
+  header.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div>
+        <div style="font-size:10px;color:var(--gold);letter-spacing:.15em;font-weight:700;text-transform:uppercase">Elevate Capital</div>
+        <div style="font-size:20px;font-weight:800;color:var(--dark);font-family:'DM Serif Display',serif">Comparateur de produits</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Analyse comparative — usage interne conseiller</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <span style="font-size:10px;background:var(--gold-bg);color:var(--gold-d);border-radius:8px;padding:3px 10px;font-weight:700;border:1px solid var(--gold)">${age} ans</span>
+        <span style="font-size:10px;background:${fumeur?'#fee2e2':'#dcfce7'};color:${fumeur?'#991b1b':'#166534'};border-radius:8px;padding:3px 10px;font-weight:700">${fumeur?'🚬 Fumeur':'✓ Non-fumeur'}</span>
+        <span style="font-size:10px;background:var(--bg2);color:var(--muted);border-radius:8px;padding:3px 10px;font-weight:600">${(S._compSexe||'M')==='M'?'♂ Homme':'♀ Femme'}</span>
+        ${revenu>0?`<span style="font-size:10px;background:var(--bg2);color:var(--muted);border-radius:8px;padding:3px 10px;font-weight:600;border:1px solid var(--border)">Revenu : ${fmt(revenu)}/an</span>`:''}
+        <button class="btn" style="font-size:10px;padding:4px 10px" onclick="showLanding()">← Menu</button>
+      </div>
+    </div>`;
+  c.appendChild(header);
+
+  // ── Paramètres du comparateur ──
+  const paramsCard = document.createElement('div');
+  paramsCard.className = 'card';
+  paramsCard.style.marginBottom = '18px';
+  paramsCard.innerHTML = `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:12px">Paramètres de comparaison</div>`;
+
+  const pg = document.createElement('div'); pg.className = 'g3';
+
+  // Capital à assurer
+  const capDiv = document.createElement('div');
+  capDiv.innerHTML = '<label class="lbl">Capital à assurer</label>';
+  const capSel = document.createElement('select'); capSel.className = 'sel';
+  [100000,250000,500000,750000,1000000,1500000,2000000].forEach(v => {
+    const o = document.createElement('option'); o.value = v;
+    o.textContent = fmt(v); o.selected = v === (S._compCapital || Math.min(1000000, Math.max(250000, besoinVie)));
+    capSel.appendChild(o);
+  });
+  capSel.onchange = e => { S._compCapital = +e.target.value; renderComparateur(); };
+  capDiv.appendChild(capSel); pg.appendChild(capDiv);
+
+  // Type de produit
+  const typeDiv = document.createElement('div');
+  typeDiv.innerHTML = '<label class="lbl">Type de produit</label>';
+  const typeSel = document.createElement('select'); typeSel.className = 'sel';
+  [
+    {v:'vie-terme', l:'Vie temporaire (terme)'},
+    {v:'vie-par', l:'Vie participante (PAR)'},
+    {v:'maladies-graves', l:'Maladies graves'},
+    {v:'invalidite', l:'Invalidité'}
+  ].forEach(({v,l}) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = l;
+    o.selected = (S._compType || 'vie-terme') === v;
+    typeSel.appendChild(o);
+  });
+  typeSel.onchange = e => { S._compType = e.target.value; renderComparateur(); };
+  typeDiv.appendChild(typeSel); pg.appendChild(typeDiv);
+
+  // Durée (pour terme)
+  const dureeDiv = document.createElement('div');
+  dureeDiv.innerHTML = '<label class="lbl">Durée (vie temporaire)</label>';
+  const dureeSel = document.createElement('select'); dureeSel.className = 'sel';
+  dureeSel.disabled = (S._compType||'vie-terme') !== 'vie-terme';
+  [{v:10,l:'T10 — 10 ans'},{v:15,l:'T15 — 15 ans'},{v:20,l:'T20 — 20 ans'},{v:30,l:'T30 — 30 ans'}].forEach(({v,l}) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = l;
+    o.selected = (S._compDuree||20) === v; dureeSel.appendChild(o);
+  });
+  dureeSel.onchange = e => { S._compDuree = +e.target.value; renderComparateur(); };
+  dureeDiv.appendChild(dureeSel); pg.appendChild(dureeDiv);
+
+  paramsCard.appendChild(pg);
+
+  // ── Paramètres avancés (toggle) ──
+  const advToggle = document.createElement('div');
+  advToggle.style.cssText = 'margin-top:12px;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px';
+  advToggle.innerHTML = `<span id="adv-arrow" style="transition:transform .2s">${S._compAdvOpen?'▼':'▶'}</span><span style="font-weight:600">Paramètres avancés (âge, sexe, tabac, revenu)</span>`;
+  paramsCard.appendChild(advToggle);
+
+  const advPanel = document.createElement('div');
+  advPanel.style.cssText = 'overflow:hidden;transition:max-height .3s;max-height:'+(S._compAdvOpen?'400px':'0px');
+  advPanel.style.marginTop = '12px';
+
+  const advGrid = document.createElement('div'); advGrid.className = 'g3'; advGrid.style.marginTop='8px';
+
+  // Sexe
+  {
+    const w = document.createElement('div');
+    w.innerHTML = '<label class="lbl">Sexe</label>';
+    const row = document.createElement('div'); row.style.cssText='display:flex;gap:6px';
+    [['Homme','M'],['Femme','F']].forEach(([l,v])=>{
+      const b = document.createElement('button'); b.className='pill'+((S._compSexe||'M')===v?' on':'');
+      b.style.cssText='font-size:11px;padding:5px 14px'; b.textContent=l;
+      b.onclick=()=>{S._compSexe=v; renderComparateur();};
+      row.appendChild(b);
+    });
+    w.appendChild(row); advGrid.appendChild(w);
+  }
+
+  // Âge manuel
+  {
+    const w = document.createElement('div');
+    w.innerHTML = '<label class="lbl">Âge (manuel)</label>';
+    const inp = document.createElement('input'); inp.type='number'; inp.className='inp';
+    inp.min=18; inp.max=70; inp.value = S._compAge || age;
+    inp.oninput = e=>{ S._compAge=+e.target.value; renderComparateur(); };
+    w.appendChild(inp); advGrid.appendChild(w);
+  }
+
+  // Tabac
+  {
+    const w = document.createElement('div');
+    w.innerHTML = '<label class="lbl">Tabac</label>';
+    const row = document.createElement('div'); row.style.cssText='display:flex;gap:6px';
+    [['Non-fumeur',false],['Fumeur',true]].forEach(([l,v])=>{
+      const b = document.createElement('button');
+      const isCurrent = S._compFumeur !== undefined ? S._compFumeur === v : fumeur === v;
+      b.className='pill'+(isCurrent?' on':'');
+      b.style.cssText='font-size:11px;padding:5px 14px'; b.textContent=l;
+      b.onclick=()=>{S._compFumeur=v; renderComparateur();};
+      row.appendChild(b);
+    });
+    w.appendChild(row); advGrid.appendChild(w);
+  }
+
+  // Revenu annuel
+  {
+    const w = document.createElement('div');
+    w.appendChild(makeMoney('Revenu annuel (pour invalidité)', S._compRevenu||revenu||60000, v=>{S._compRevenu=v; renderComparateur();}));
+    advGrid.appendChild(w);
+  }
+
+  // Période de carence (invalidité)
+  {
+    const w = document.createElement('div');
+    w.innerHTML='<label class="lbl">Carence invalidité</label>';
+    const sel = document.createElement('select'); sel.className='sel';
+    [['30 jours',30],['60 jours',60],['90 jours',90],['120 jours',120],['180 jours',180]].forEach(([l,v])=>{
+      const o=document.createElement('option'); o.value=v; o.textContent=l;
+      o.selected=(S._compCarence||90)===v; sel.appendChild(o);
+    });
+    sel.onchange=e=>{S._compCarence=+e.target.value; renderComparateur();};
+    w.appendChild(sel); advGrid.appendChild(w);
+  }
+
+  // % invalidité à remplacer
+  {
+    const w = document.createElement('div');
+    w.innerHTML='<label class="lbl">% revenu à remplacer</label>';
+    const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    [50,60,70,80].forEach(v=>{
+      const b=document.createElement('button'); b.className='pill'+((S._compPctInv||60)===v?' on':'');
+      b.style.cssText='font-size:11px;padding:5px 10px'; b.textContent=v+'%';
+      b.onclick=()=>{S._compPctInv=v; renderComparateur();};
+      row.appendChild(b);
+    });
+    w.appendChild(row); advGrid.appendChild(w);
+  }
+
+  advPanel.appendChild(advGrid);
+  paramsCard.appendChild(advPanel);
+
+  advToggle.onclick = ()=>{
+    S._compAdvOpen = !S._compAdvOpen;
+    advPanel.style.maxHeight = S._compAdvOpen ? '400px' : '0px';
+    document.getElementById('adv-arrow').style.transform = S._compAdvOpen ? 'rotate(0deg)' : '';
+    document.getElementById('adv-arrow').textContent = S._compAdvOpen ? '▼' : '▶';
+  };
+
+  c.appendChild(paramsCard);
+
+  // ── Construire les données du tableau ──
+  const type = S._compType || 'vie-terme';
+  const capital = S._compCapital || Math.min(1000000, Math.max(250000, besoinVie));
+  const duree = S._compDuree || 20;
+
+  let prodNom, prodKey;
+  if (type === 'vie-terme') {
+    prodNom = 'Vie temporaire'; prodKey = capital <= 250000 ? `Vie temporaire T${duree} 250k` : `Vie temporaire T20 500k`;
+  } else if (type === 'vie-par') {
+    prodNom = 'Vie participante'; prodKey = 'Vie participante 250k';
+  } else if (type === 'maladies-graves') {
+    prodNom = 'Maladies graves'; prodKey = 'Maladies graves T20 100k';
+    // Pour MG, capital de référence = 100k
+  } else {
+    prodNom = 'Invalidité'; prodKey = 'Invalidité 60% 65ans';
+  }
+
+  // Compiler compagnies avec scores
+  const compData = [];
+  Object.entries(COMP_STRENGTHS).forEach(([nom, prods]) => {
+    const data = prods[prodNom];
+    if (!data || data.score === 0) return;
+    // Vérifier que la compagnie est active dans les préférences
+    const prodEntry = products[prodNom];
+    if (!prodEntry || !prodEntry.companies || !prodEntry.companies[nom]) return;
+
+    const prefLabel = prodEntry.companies[nom].label;
+    const sexe = S._compSexe||'M'; const pctInv = S._compPctInv||60;
+    const prime = getPrime(prodKey, age, fumeur, capital, sexe, pctInv);
+    const primeAdj = prodNom==='Invalidité' ? Math.round((revenu||60000)*0.6/12*0.025) : prime;
+
+    compData.push({
+      nom, score: data.score, forces: data.forces, delai: data.delai,
+      prime: prime, prefLabel,
+      note: prodEntry.companies[nom].note
+    });
+  });
+
+  // Trier par score
+  compData.sort((a,b) => b.score - a.score);
+
+  if (compData.length === 0) {
+    c.innerHTML += '<div style="padding:40px;text-align:center;color:var(--muted)">Aucune compagnie disponible pour ce produit.<br>Vérifiez vos préférences dans ⚙️ Paramètres.</div>';
+    return;
+  }
+
+  // ── TABLEAU CÔTE-À-CÔTE ──────────────────────────────────────────
+  const tableSection = document.createElement('div');
+  tableSection.style.marginBottom = '24px';
+
+  // Titre section
+  const tHead = document.createElement('div');
+  tHead.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px';
+  tHead.innerHTML = `
+    <div>
+      <div style="font-size:14px;font-weight:800;color:var(--dark)">${prodNom}${type==='vie-terme'?' — T'+duree:''} · ${fmt(capital)}</div>
+      <div style="font-size:11px;color:var(--muted)">${compData.length} compagnies comparées · Primes estimées $/mois · ${fumeur?'Fumeur':'Non-fumeur'} · ${age} ans</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" style="font-size:10px;padding:4px 10px" onclick="window.print()">🖨️ Imprimer</button>
+    </div>`;
+  tableSection.appendChild(tHead);
+
+  // Podium top 3
+  const podium = document.createElement('div');
+  podium.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px';
+  const medals = ['🥇','🥈','🥉'];
+  const podiumColors = ['var(--gold)','#94a3b8','#cd7f32'];
+  const podiumBgs = ['var(--gold-bg)','#f8fafc','#fff8f4'];
+
+  compData.slice(0,3).forEach((co, i) => {
+    const card = document.createElement('div');
+    card.style.cssText = `border-radius:12px;border:2px solid ${podiumColors[i]};padding:16px;background:${podiumBgs[i]};position:relative;overflow:hidden`;
+    const rankBadge = i===0 ? `<div style="position:absolute;top:0;right:0;background:${podiumColors[0]};color:white;font-size:9px;font-weight:800;padding:3px 10px;border-radius:0 10px 0 8px">RECOMMANDÉ</div>` : '';
+
+    const prime = co.prime ? `<div style="font-size:18px;font-weight:800;color:${podiumColors[i]};margin-bottom:4px">${co.prime}$/mois</div><div style="font-size:9px;color:var(--muted)">Prime estimée</div>` : '';
+
+    card.innerHTML = `
+      ${rankBadge}
+      <div style="font-size:22px;margin-bottom:6px">${medals[i]}</div>
+      <div style="font-size:13px;font-weight:800;color:var(--dark);margin-bottom:4px">${co.nom}</div>
+      <div style="margin-bottom:8px;padding:3px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+        <span style="font-size:10px;background:${i===0?'var(--gold)':'var(--bg2)'};color:${i===0?'white':'var(--muted)'};border-radius:6px;padding:1px 7px;font-weight:700">${co.score}/100</span>
+        <span style="font-size:9px;color:${co.prefLabel==='star'?'var(--gold-d)':'var(--green)'};margin-left:5px;font-weight:600">${co.prefLabel==='star'?'⭐ Favori':'✓ Solide'}</span>
+      </div>
+      ${prime}
+      <div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">
+        ${(co.forces||[]).map(f=>`<div style="font-size:10px;color:var(--text);display:flex;gap:4px"><span style="color:${podiumColors[i]};flex-shrink:0">▸</span>${f}</div>`).join('')}
+      </div>
+      <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,0,0,.08)">
+        <div style="font-size:9px;color:var(--muted)">⏱ ${co.delai}</div>
+      </div>`;
+    podium.appendChild(card);
+  });
+  tableSection.appendChild(podium);
+
+  // Tableau complet
+  const tableWrap = document.createElement('div');
+  tableWrap.style.cssText = 'background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:0 1px 8px rgba(0,0,0,.06)';
+
+  // En-tête tableau
+  const tableHead = document.createElement('div');
+  tableHead.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr 2fr;background:var(--dark);color:white;padding:10px 14px;gap:10px';
+  tableHead.innerHTML = `
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em">Compagnie</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;text-align:center">Score</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;text-align:center">Prime est.</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;text-align:center">Délai</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em">Forces clés</div>`;
+  tableWrap.appendChild(tableHead);
+
+  compData.forEach((co, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:grid;grid-template-columns:2fr 1fr 1fr 1fr 2fr;padding:10px 14px;gap:10px;border-bottom:1px solid var(--border);background:${i===0?'var(--gold-bg)':i%2===0?'white':'var(--bg2)'};align-items:center;cursor:pointer;transition:background .1s`;
+    row.onmouseenter = () => row.style.background = '#f0f9ff';
+    row.onmouseleave = () => row.style.background = i===0?'var(--gold-bg)':i%2===0?'white':'var(--bg2)';
+
+    const rankIcon = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+    const scoreColor = co.score>=90?'var(--green)':co.score>=80?'var(--gold-d)':'var(--muted)';
+
+    row.innerHTML = `
+      <div>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${rankIcon?`<span>${rankIcon}</span>`:`<span style="width:16px;height:16px;border-radius:50%;background:var(--border);color:var(--muted);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${i+1}</span>`}
+          <span style="font-size:12px;font-weight:${i<3?700:500};color:var(--dark)">${co.nom}</span>
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px;margin-left:22px">${co.note||''}</div>
+      </div>
+      <div style="text-align:center">
+        <span style="font-size:13px;font-weight:800;color:${scoreColor}">${co.score}</span>
+        <div style="width:100%;height:3px;background:var(--border);border-radius:2px;margin-top:3px"><div style="height:3px;border-radius:2px;background:${scoreColor};width:${co.score}%"></div></div>
+      </div>
+      <div style="text-align:center;font-size:12px;font-weight:700;color:var(--gold-d)">${co.prime ? co.prime+'$' : '—'}</div>
+      <div style="font-size:10px;color:var(--muted);text-align:center">${co.delai}</div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        ${(co.forces||[]).slice(0,2).map(f=>`<div style="font-size:10px;color:var(--text);display:flex;gap:4px"><span style="color:var(--gold);flex-shrink:0">▸</span>${f}</div>`).join('')}
+      </div>`;
+    tableWrap.appendChild(row);
+  });
+
+  // Légende primes
+  const legend = document.createElement('div');
+  legend.style.cssText = 'padding:8px 14px;background:var(--bg2);border-top:1px solid var(--border);font-size:10px;color:var(--muted)';
+  legend.textContent = '⚠️ Primes estimées à titre indicatif — basées sur barèmes marché 2024-2025. Obtenir illustrations officielles avant présentation client.';
+  tableWrap.appendChild(legend);
+  tableSection.appendChild(tableWrap);
+  c.appendChild(tableSection);
+
+  // ── AVENANTS & GARANTIES ────────────────────────────────────────
+  const avenants = AVENANTS[prodNom];
+  if (avenants && avenants.length > 0) {
+    const avSection = document.createElement('div');
+    avSection.style.marginBottom = '24px';
+    avSection.innerHTML = `
+      <div style="font-size:14px;font-weight:800;color:var(--dark);margin-bottom:12px">
+        Avenants & garanties — ${prodNom}
+        <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:8px">Options à ajouter selon le profil client</span>
+      </div>`;
+
+    const avGrid = document.createElement('div');
+    avGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px';
+
+    avenants.forEach(av => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:white;border-radius:10px;border:1px solid var(--border);padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.04)';
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:var(--dark)">${av.nom}</div>
+          <span style="font-size:10px;background:var(--gold-bg);color:var(--gold-d);border-radius:6px;padding:1px 7px;font-weight:700;white-space:nowrap;margin-left:8px">${av.impact}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${av.desc}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          ${av.companies.map(co=>`<span style="font-size:9px;background:var(--bg2);color:var(--text);border-radius:5px;padding:1px 6px;border:1px solid var(--border)">${co}</span>`).join('')}
+        </div>`;
+      avGrid.appendChild(card);
+    });
+    avSection.appendChild(avGrid);
+    c.appendChild(avSection);
+  }
+
+  // ── FICHE CLIENT IMPRIMABLE ──────────────────────────────────────
+  const ficheSection = document.createElement('div');
+  ficheSection.style.cssText = 'background:white;border-radius:12px;border:1.5px solid var(--gold);overflow:hidden;box-shadow:0 2px 12px rgba(200,169,81,.15)';
+
+  ficheSection.innerHTML = `
+    <div style="background:linear-gradient(135deg,var(--dark),#1a1a2e);padding:16px 20px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:9px;color:var(--gold);letter-spacing:.15em;font-weight:700;text-transform:uppercase">Elevate Capital · Fiche client</div>
+        <div style="font-size:16px;font-weight:800;color:white;margin-top:2px">${prodNom}${type==='vie-terme'?' — T'+duree:''}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:rgba(255,255,255,.5)">${new Date().toLocaleDateString("fr-CA")}</div>
+        <div style="font-size:11px;color:var(--gold);font-weight:700">${age} ans · ${fumeur?'Fumeur':'Non-fumeur'}</div>
+      </div>
+    </div>`;
+
+  const ficheBody = document.createElement('div');
+  ficheBody.style.cssText = 'padding:18px 20px';
+
+  // Comparaison top 3 côte-à-côte format fiche
+  ficheBody.innerHTML = `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Les 3 meilleures options pour votre situation</div>`;
+
+  const ficheGrid = document.createElement('div');
+  ficheGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px';
+
+  compData.slice(0,3).forEach((co, i) => {
+    const fc = document.createElement('div');
+    fc.style.cssText = `padding:12px;border-radius:9px;border:1.5px solid ${i===0?'var(--gold)':'var(--border)'};background:${i===0?'var(--gold-bg)':'white'}`;
+    fc.innerHTML = `
+      <div style="font-size:10px;color:${i===0?'var(--gold-d)':'var(--muted)'};font-weight:700;text-transform:uppercase;margin-bottom:5px">Option ${i+1} ${i===0?'— RECOMMANDÉE':''}</div>
+      <div style="font-size:14px;font-weight:800;color:var(--dark);margin-bottom:4px">${co.nom}</div>
+      ${co.prime?`<div style="font-size:18px;font-weight:800;color:${i===0?'var(--gold-d)':'var(--dark)'};">${co.prime}<span style="font-size:10px;font-weight:400;color:var(--muted)">/mois*</span></div>`:''}
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+        ${(co.forces||[]).slice(0,2).map(f=>`<div style="font-size:10px;color:var(--text);display:flex;gap:4px"><span style="color:${i===0?'var(--gold)':'var(--muted)'};flex-shrink:0">✓</span>${f}</div>`).join('')}
+      </div>`;
+    ficheGrid.appendChild(fc);
+  });
+  ficheBody.appendChild(ficheGrid);
+
+  // Note importante + CTA
+  ficheBody.innerHTML += `
+    <div style="font-size:10px;color:var(--muted);padding:8px 12px;background:var(--bg2);border-radius:7px;margin-bottom:12px">
+      * Primes estimées à titre indicatif. Des illustrations officielles vous seront remises lors de notre prochaine rencontre.
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text)">
+        <span style="font-weight:700">Vincent Froment</span> · <a href="mailto:vincent@elevate-capital.com" style="color:var(--gold)">vincent@elevate-capital.com</a>
+      </div>
+      <a href="https://elevate-capital.com/rencontre" target="_blank" style="font-size:10px;background:var(--gold);color:white;padding:5px 12px;border-radius:7px;text-decoration:none;font-weight:700">Prendre rendez-vous →</a>
+    </div>`;
+
+  ficheSection.appendChild(ficheBody);
+  c.appendChild(ficheSection);
+
+  // Bouton retour landing
+  const backRow = document.createElement('div');
+  backRow.style.cssText = 'display:flex;gap:10px;margin-top:16px;flex-wrap:wrap';
+  const bBack = document.createElement('button'); bBack.className='btn'; bBack.innerHTML='← Retour au menu';
+  bBack.onclick=()=>showLanding(); backRow.appendChild(bBack);
+  const bPrint = document.createElement('button'); bPrint.className='btn btn-gold'; bPrint.innerHTML='🖨️ Imprimer la fiche client';
+  bPrint.onclick=()=>window.print(); backRow.appendChild(bPrint);
+  c.appendChild(backRow);
+}
+
+// ── Démarrer le comparateur ──────────────────────────────────────────
+function startComparateur() {
+  try {
+    appMode = 'comparateur';
+    $("landing").style.display = 'none';
+    ['e0','e1','e2','e3'].forEach(s=>{const d=$("step-"+s);if(d)d.style.display='none';});
+    for(let i=0;i<8;i++){const d=$("step-"+i);if(d)d.style.display='none';}
+    document.querySelector('.stepper.no-print').style.display='none';
+    const cc=$("comp-container");
+    if(!cc){ console.error("comp-container introuvable!"); return; }
+    cc.style.display='block';
+    renderComparateur();
+  } catch(e) {
+    console.error("Erreur startComparateur:", e);
+    alert("Erreur comparateur: " + e.message);
+  }
+}
+window.startComparateur = startComparateur;
+
 function renderAll(){
   try{ renderStepper(); }catch(e){console.error("STEPPER:",e);}
   try{ renderStep0(); }catch(e){console.error("STEP0:",e);}
@@ -3185,6 +3957,85 @@ function renderAll(){
   try{ renderStep7(); }catch(e){console.error("STEP7:",e);}
   showStep(currentStep); updateHdr();
 }
+// ── AUTO-SAVE ──────────────────────────────────────────
+function autoSaveDossier() {
+  try {
+    localStorage.setItem('ec_dossier_autosave', JSON.stringify(S));
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('fr-CA', {hour:'2-digit',minute:'2-digit'});
+    const el = document.getElementById('hdr-autosave');
+    if(el) { el.textContent = '💾 ' + timeStr; el.style.color = 'var(--green)'; }
+    // Sauvegarder dans historique multi-dossiers
+    if(S.vous.nom || S.vous.prenom) {
+      const hist = JSON.parse(localStorage.getItem('ec_dossier_history')||'[]');
+      const entry = {
+        id: S._dossierId || (S._dossierId = Date.now()),
+        nom: (S.vous.prenom||'') + ' ' + (S.vous.nom||''),
+        date: S.dateRencontre || now.toLocaleDateString('fr-CA'),
+        heure: timeStr,
+        snapshot: JSON.stringify(S)
+      };
+      const idx = hist.findIndex(h=>h.id===entry.id);
+      if(idx>=0) hist[idx]=entry; else hist.unshift(entry);
+      localStorage.setItem('ec_dossier_history', JSON.stringify(hist.slice(0,10)));
+    }
+  } catch(e) { console.error('Auto-save error:', e); }
+}
+
+function loadAutoSave() {
+  try {
+    const saved = localStorage.getItem('ec_dossier_autosave');
+    if(saved) { const d=JSON.parse(saved); if(d.vous) return d; }
+  } catch(e) {}
+  return null;
+}
+
+// Lancer l'auto-save toutes les 30 secondes
+setInterval(autoSaveDossier, 30000);
+
+// ── CHRONOMÈTRE ────────────────────────────────────────
+let _timerStart = null;
+let _timerInterval = null;
+let _timerRunning = false;
+
+function startTimer() {
+  if(_timerRunning) { stopTimer(); return; }
+  _timerStart = _timerStart || Date.now();
+  _timerRunning = true;
+  _timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+  const btn = document.getElementById('timer-btn');
+  if(btn) { btn.textContent = '⏸'; btn.title = 'Pause'; }
+}
+
+function stopTimer() {
+  _timerRunning = false;
+  clearInterval(_timerInterval);
+  const btn = document.getElementById('timer-btn');
+  if(btn) { btn.textContent = '▶'; btn.title = 'Reprendre'; }
+}
+
+function resetTimer() {
+  stopTimer();
+  _timerStart = null;
+  const el = document.getElementById('hdr-timer');
+  if(el) el.textContent = '00:00';
+  const btn = document.getElementById('timer-btn');
+  if(btn) { btn.textContent = '▶'; btn.title = 'Démarrer'; }
+}
+
+function updateTimer() {
+  if(!_timerStart) return;
+  const elapsed = Math.floor((Date.now() - _timerStart) / 1000);
+  const min = Math.floor(elapsed/60).toString().padStart(2,'0');
+  const sec = (elapsed%60).toString().padStart(2,'0');
+  const el = document.getElementById('hdr-timer');
+  if(el) {
+    el.textContent = min+':'+sec;
+    el.style.color = elapsed > 1200 ? 'var(--red)' : elapsed > 600 ? '#f59e0b' : 'var(--gold)';
+  }
+}
+
 showLanding();
 </script>
 </body>
